@@ -1,0 +1,37 @@
+Except written otherwise, numbers (including ports) are encoded in little endian
+Except written otherwise, messages are valid client to server and server to client and on both protocols
+
+Bridges configured are then identified by their index
+
+Message codes (excluding initial port transmission over TCP):
+
+- 0 : No-op
+
+- 1 : Config (configure a bridge, giving information on server-side endpoint)
+	Client to server only
+	* 2b : message size (proto + dst port + target name with null term)
+	* 1b : protocol (0:TCP, 1:UDP)
+	* 2b : dst port
+	* ?b : target name, null-terminated
+
+- 2 : Message (any proto, the bridge is on the same proto as the message was transmitted)
+	* 2b : bridge index
+	* 4b : payload size
+	* ?b : payload
+
+- 3 : Connect (TCP only, client to server)
+	tcp connected to client endpoint, do the same on server endpoint
+	* 2b : bridge index
+
+- 4 : UDP Connected (UDP only)
+
+- 5 : TCP Disconnected (TCP Only)
+	* 2b : bridge index
+
+==============================================
+
+Config file:
+
+One line = One bridge
+
+<tcp/udp> client_hostname client_port server_hostname server_port
