@@ -198,7 +198,7 @@ void Client::proc_loop()
 
 		for(;iter_pfd < m_pfds.end(); ++iter_pfd)
 		{
-			if(check_conn_pfd(iter_pfd)) return;
+			if(check_conn_pfd(iter_pfd)) break;
 		}
 	}
 }

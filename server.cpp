@@ -223,14 +223,15 @@ void Server::process_tcp_message()
 			uint32_t dat_size = DECODE_UINT32(&hdr[8]);
 
 			auto conn = m_connections.find(idx_cn);
+
+			m_message_buffer.resize(dat_size);
+			CHECK_RET(m_tcp_proto_conn.Recv(m_message_buffer, MSG_WAITALL))
+
 			if(conn == m_connections.end())
 			{
 				std::cout << "Message on dead connection " << idx_cn << std::endl;
 				return;
 			}
-
-			m_message_buffer.resize(dat_size);
-			CHECK_RET(m_tcp_proto_conn.Recv(m_message_buffer, MSG_WAITALL))
 
 			CHECK_RET(conn->second.sck.Send(m_message_buffer))
 			return;
