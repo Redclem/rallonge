@@ -267,19 +267,21 @@ public:
 		return {r, std::move(adr)};
 	}
 
-	auto recv_raw(void * buf, size_t size, int flags = 0)
+	typedef std::invoke_result_t<decltype(recv), socket_t, char*, size_t, int> recv_res_t;
+
+	recv_res_t Recv_raw(void * buf, size_t size, int flags = 0)
 	{
 		return ::recv(m_sck, reinterpret_cast<char*>(buf), size, flags);
 	}
 
-	auto recvfrom_raw(void * buf, size_t size, Address & addr, int flags = 0)
+	recv_res_t Recvfrom_raw(void * buf, size_t size, Address & addr, int flags = 0)
 	{
 		addr = Address(sizeof(sockaddr_in6));
 		return ::recvfrom(m_sck, reinterpret_cast<char*>(buf), size, flags, addr.m_sa, &addr.m_alen);
 	}
 
 	template<typename Cont>
-	bool recv(Cont & buf, int flags = 0)
+	bool Recv(Cont & buf, int flags = 0)
 	{
 		int res = ::recv(m_sck, reinterpret_cast<char*>(buf.data()), buf.size(), flags);
 		CHECK_RET(res != -1);
@@ -299,18 +301,18 @@ public:
 	}
 
 	template<typename Cont>
-	int send(const Cont & buf, int flags = 0)
+	int Send(const Cont & buf, int flags = 0)
 	{
 		return ::send(m_sck, reinterpret_cast<const char*>(buf.data()), buf.size(), flags);
 	}
 	
 	template<typename Cont>
-	int sendto(const Cont & buf, Address a, int flags = 0)
+	int Sendto(const Cont & buf, Address a, int flags = 0)
 	{
 		return ::sendto(m_sck, reinterpret_cast<const char*>(buf.data()), buf.size(), flags, a.m_sa, a.m_alen);
 	}
 	
-	int sendto_raw(const void * dat, size_t len, Address a, int flags = 0)
+	int Sendto_raw(const void * dat, size_t len, Address a, int flags = 0)
 	{
 		return ::sendto(m_sck, reinterpret_cast<const char *>(dat), len, flags, a.m_sa, a.m_alen);
 	}

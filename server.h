@@ -14,8 +14,7 @@ class Server : public AppBase
 {
 	uint16_t m_tcp_port;
 
-	std::vector<CombinedAddressSocket> m_tcp_sockets;
-
+	std::vector<Address> m_tcp_addresses;
 public:
 
 	Server(port_t tp) : m_tcp_port(tp) {}
@@ -29,22 +28,7 @@ public:
 
 	void add_endpoint(Proto::Protocol proto, port_t dst_port, const char * hostname);
 
-	void disconnect_tcp(uint16_t bridge)
-	{
-		if(m_pfds[bridge + 2].fd != m_tcp_sockets[bridge].sck.socket())
-		{
-			std::cout << "Double disconnect of bridge " << bridge << std::endl;
-			return;
-		}
-
-		m_pfds[bridge + 2].fd = ~m_pfds[bridge + 2].fd;
-
-		m_tcp_sockets[bridge].sck.destroy();
-		m_tcp_sockets[bridge].sck.create(m_tcp_sockets[bridge].addr.af(), SOCK_STREAM);
-
-		std::cout << "TCP bridge " << bridge << " disconnected." << std::endl;
-	}
-
+	
 };
 
 #endif

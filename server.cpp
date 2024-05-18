@@ -1,4 +1,5 @@
 #include "server.h"
+#include "app_base.h"
 #include "ral_proto.h"
 #include "socket.hpp"
 
@@ -6,6 +7,7 @@
 #include <iostream>
 #include <iterator>
 #include <stdexcept>
+#include <sys/socket.h>
 #include <tuple>
 #include <array>
 
@@ -47,8 +49,8 @@ void Server::initiate()
 	port[0] = m_udp_port;
 	port[1] = m_udp_port >> 8;
 
-	CHECK_RET(m_tcp_proto_conn.send(port))
-	CHECK_RET(m_tcp_proto_conn.recv(port))
+	CHECK_RET(m_tcp_proto_conn.Send(port))
+	CHECK_RET(m_tcp_proto_conn.Recv(port))
 	CHECK_RET(!port.empty());
 
 	port_t client_udp_port = port[0] | port[1] << 8;
@@ -69,22 +71,16 @@ void Server::add_endpoint(Proto::Protocol proto, port_t dst_port, const char * h
 {
 	std::cout << "Adding endpoint for protocol " << (proto == Proto::Protocol::TCP ? "TCP" : "UDP") << " at " << hostname << ':' << dst_port << std::endl;
 
-	CombinedAddressSocket sck = {
-		{},
-		{AF_INET, SOCK_STREAM, hostname, dst_port}
-	};
+	Address adr{AF_INET, SOCK_STREAM, hostname, dst_port};
 
 	if(proto == Proto::Protocol::TCP)
 	{
-		CHECK_RET(sck.sck.create(sck.addr.af(), SOCK_STREAM))
-
-		// Add pfd
-		m_pfds.insert(m_pfds.end() - m_udp_sockets.size(), {~sck.sck.socket(), POLLIN, 0});
-
-		m_tcp_sockets.push_back(std::move(sck));
+		m_tcp_addresses.push_back(std::move(adr));
 	}
 	else if(proto == Proto::Protocol::UDP)
 	{
+		CombinedAddressSocket sck{{}, std::move(adr)};
+
 		CHECK_RET(sck.sck.create(sck.addr.af(), SOCK_DGRAM))
 
 		m_pfds.push_back({sck.sck.socket(), POLLIN, 0});
@@ -96,19 +92,21 @@ void Server::add_endpoint(Proto::Protocol proto, port_t dst_port, const char * h
 
 void Server::proc_loop()
 {
-	while(true)
+	while(m_run)
 	{
 		// Poll
 		int rpoll;
-
-		do
+		
+		// UDP Keepalive
+		if(ka_message())
 		{
-			// UDP Keepalive
 			std::array<Proto::OpCode, 1> ka{Proto::OpCode::NOP};
-			m_udp_proto_conn.sendto(ka, m_proto_udp_address);
+			m_udp_proto_conn.Sendto(ka, m_proto_udp_address);
+		}
 
-			rpoll = poll(m_pfds.data(), m_pfds.size(), 1000);
-		} while(rpoll == 0);
+		rpoll = poll(m_pfds.data(), m_pfds.size(), 5000);
+		
+		if(rpoll == 0) continue;
 
 		CHECK_RET(rpoll);
 
@@ -136,7 +134,7 @@ void Server::proc_loop()
 			CHECK_RET(poll(&m_pfds.front(), 1, 0) >= 0)
 		}
 
-		// pfd vector won't change ahead
+		// pfd vector won't invalidate ahead
 
 		auto iter_pfd = std::next(m_pfds.begin());
 
@@ -149,71 +147,15 @@ void Server::proc_loop()
 
 		// Check endpoints
 		
-		// TCP
-		uint16_t bridge(0);
-		for(auto & sck : m_tcp_sockets)
-		{
-			while(
-				iter_pfd->revents
-#ifdef WIN32
-      				& (~POLLNVAL)
-#endif
-			)
-			{
-				decltype(sck.sck.recv_raw(m_message_buffer.data(), m_message_buffer.size())) recres;
-
-				if(iter_pfd->revents & (POLLHUP | POLLERR))
-				{
-					recres = 0;
-				}
-				else
-				{
-					m_message_buffer.resize(m_message_buffer.capacity());
-					
-					recres = sck.sck.recv_raw(m_message_buffer.data() + 7, m_message_buffer.size() - 7);
-					CHECK_RET(recres >= 0);
-				}
-				
-				if(recres == 0) // Connection loss
-				{
-					std::cout << "Bridge " << bridge << " Hung up." << std::endl;
-
-					disconnect_tcp(bridge);
-
-					std::array<unsigned char, 3> cod = {(unsigned char)(Proto::OpCode::TCP_DISCONNECTED)};
-					ENCODE_UINT16(bridge, &cod[1])
-					
-					CHECK_RET(m_tcp_proto_conn.send(cod))
-
-					// Do not poll, as struct contains a disabled socket.
-					iter_pfd->revents = 0;
-				}
-				else // Message
-				{
-					m_message_buffer.resize(recres + 7);
-					m_message_buffer[0] = (unsigned char)(Proto::OpCode::MESSAGE);
-
-					ENCODE_UINT16(bridge, m_message_buffer.data() + 1)
-					ENCODE_UINT32(recres, m_message_buffer.data() + 3)
-
-					CHECK_RET(m_tcp_proto_conn.send(m_message_buffer))
-
-					CHECK_RET(poll(&(*iter_pfd), 1, 0) >= 0)
-				}
-			}
-
-			iter_pfd++;
-			bridge++;
-		}
-
+		
 		// UDP
-		bridge = 0;
+		uint16_t bridge = 0;
 		for(auto & sck : m_udp_sockets)
 		{
 			while(iter_pfd->revents)
 			{
 				m_message_buffer.resize(m_message_buffer.capacity());
-				auto recres = sck.sck.recv_raw(m_message_buffer.data() + 7, m_message_buffer.size() - 7);
+				auto recres = sck.sck.Recv_raw(m_message_buffer.data() + 7, m_message_buffer.size() - 7);
 				CHECK_RET(recres >= 0);
 
 				m_message_buffer.resize(recres + 7);
@@ -223,7 +165,7 @@ void Server::proc_loop()
 				ENCODE_UINT16(bridge, m_message_buffer.data() + 1)
 				ENCODE_UINT32(recres, m_message_buffer.data() + 3)
 
-				m_udp_proto_conn.sendto(m_message_buffer, m_proto_udp_address);
+				m_udp_proto_conn.Sendto(m_message_buffer, m_proto_udp_address);
 
 				CHECK_RET(poll(&(*iter_pfd), 1, 0) >= 0)
 			}
@@ -231,6 +173,14 @@ void Server::proc_loop()
 			iter_pfd++;
 			bridge++;
 		}
+
+		// TCP
+		
+		for(;iter_pfd != m_pfds.end(); iter_pfd++)
+		{
+			if(check_conn_pfd(iter_pfd)) break;
+		}
+
 	}
 }
 
@@ -239,7 +189,7 @@ void Server::process_tcp_message()
 {
 
 	StatVec<1> opcode;
-	m_tcp_proto_conn.recv(opcode);
+	m_tcp_proto_conn.Recv(opcode);
 
 	if(opcode.dyn_size == 0)
 	{
@@ -254,47 +204,65 @@ void Server::process_tcp_message()
 	case Proto::OpCode::CONFIG:
 		{
 			std::array<unsigned char, 2> size_dat;
-			CHECK_RET(m_tcp_proto_conn.recv(size_dat))
+			CHECK_RET(m_tcp_proto_conn.Recv(size_dat))
 
 			uint16_t size = DECODE_UINT16(size_dat.data());
 			
 			m_message_buffer.resize(size);
-			CHECK_RET(m_tcp_proto_conn.recv(m_message_buffer))
+			CHECK_RET(m_tcp_proto_conn.Recv(m_message_buffer))
 
 			add_endpoint(Proto::Protocol(m_message_buffer[0]), DECODE_UINT16(m_message_buffer.data() + 1), reinterpret_cast<char*>(m_message_buffer.data() + 3));
 		}
 		return;
 	case Proto::OpCode::MESSAGE:
 		{
-			std::array<unsigned char, 6> hdr;
-			CHECK_RET(m_tcp_proto_conn.recv(hdr))
+			std::array<unsigned char, 12> hdr;
+			CHECK_RET(m_tcp_proto_conn.Recv(hdr))
 
-			uint16_t bridge = DECODE_UINT16(hdr);
-			uint32_t dat_size = DECODE_UINT32(hdr.data() + 2);
+			key_sock_t idx_cn = DECODE_KEY(hdr.data());
+			uint32_t dat_size = DECODE_UINT32(&hdr[8]);
+
+			auto conn = m_connections.find(idx_cn);
+			if(conn == m_connections.end())
+			{
+				std::cout << "Message on dead connection " << idx_cn << std::endl;
+				return;
+			}
 
 			m_message_buffer.resize(dat_size);
-			CHECK_RET(m_tcp_proto_conn.recv(m_message_buffer, MSG_WAITALL))
+			CHECK_RET(m_tcp_proto_conn.Recv(m_message_buffer, MSG_WAITALL))
 
-			CHECK_RET(m_tcp_sockets[bridge].sck.send(m_message_buffer))
+			CHECK_RET(conn->second.sck.Send(m_message_buffer))
 			return;
 		}
 	case Proto::OpCode::CONNECT:
 		{
-			std::array<unsigned char, 2> bridge_dat;
-			CHECK_RET(m_tcp_proto_conn.recv(bridge_dat))
+			std::array<unsigned char, 10> bridge_dat;
+			CHECK_RET(m_tcp_proto_conn.Recv(bridge_dat))
 			
 			uint16_t bridge = DECODE_UINT16(bridge_dat);
+			key_sock_t key = DECODE_KEY(&bridge_dat[2]);
 
-			if(m_pfds[2 + bridge].fd == m_tcp_sockets[bridge].sck.socket())
+			Connection newcon{{}, key, m_pfds.size()};
+
+			CHECK_RET(newcon.sck.create(AF_INET, SOCK_STREAM))
+
+			if(newcon.sck.connect(m_tcp_addresses[bridge]))
 			{
-				std::cout << "Double connect of bridge " << bridge << std::endl;
-				return;
+				// Send established
+				
+				std::array<unsigned char, 17> msg_estab = {(unsigned char)(Proto::OpCode::TCP_ESTABLISHED)};
+				ENCODE_KEY(key, &msg_estab[1])
+				ENCODE_KEY(newcon.sck.socket(), &msg_estab[9])
+
+				CHECK_RET(m_tcp_proto_conn.Send(msg_estab))
+
+				std::cout << "TCP bridge " << bridge << " connected, key " << key << ", " << newcon.sck.socket() << std::endl;
+
+				m_pfds.push_back({newcon.sck.socket(), POLLIN, 0});
+
+				m_connections.emplace(newcon.sck.socket(), std::move(newcon));
 			}
-
-			std::cout << "TCP bridge " << bridge << " connected." << std::endl;
-
-			if(m_tcp_sockets[bridge].sck.connect(m_tcp_sockets[bridge].addr))
-				m_pfds[2 + bridge].fd = ~m_pfds[2 + bridge].fd;
 			else if(
 #ifdef __unix__
 				errno == ECONNREFUSED
@@ -303,28 +271,26 @@ void Server::process_tcp_message()
 #endif
 			) {
 				// Connection refused
-				m_tcp_sockets[bridge].sck.destroy();
-				CHECK_RET(m_tcp_sockets[bridge].sck.create(AF_INET, SOCK_STREAM))
-				std::cout << "Connection refused on bridge " << bridge << std::endl;
-				std::array<unsigned char, 3> msg;
+				std::cout << "Connection refused on bridge " << bridge << ", key : " << key << std::endl;
+				std::array<unsigned char, 9> msg = {(unsigned char)(Proto::OpCode::TCP_DISCONNECTED)};
 
-				msg[0] = (unsigned char)(Proto::OpCode::TCP_DISCONNECTED);
-				ENCODE_UINT16(bridge, &msg[1]);
+				ENCODE_KEY(key, &msg[1]);
 				
-				m_tcp_proto_conn.send(msg);
+				m_tcp_proto_conn.Send(msg);
+
+				return;
 			}
 			else
 				throw std::runtime_error("connect failed");
-
-
+	
 			return;
 		}
 	case Proto::OpCode::TCP_DISCONNECTED:
 		{
-			std::array<unsigned char, 2> bridge_dat;
-			CHECK_RET(m_tcp_proto_conn.recv(bridge_dat))
-			
-			disconnect_tcp(DECODE_UINT16(bridge_dat));
+			std::array<unsigned char, 8> bridge_dat;
+			CHECK_RET(m_tcp_proto_conn.Recv(bridge_dat))
+
+			disconnect_tcp<false>(DECODE_KEY(bridge_dat.data()));
 
 			return;
 		}

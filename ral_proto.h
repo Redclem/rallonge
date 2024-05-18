@@ -1,6 +1,8 @@
 #ifndef RAL_PROTO_H
 #define RAL_PROTO_H
 
+#include <cstddef>
+
 #define ENCODE_UINT16(n, loc) (loc)[0] = n & 255; (loc)[1] = n >> 8;
 #define DECODE_UINT16(loc) (uint16_t((loc)[0]) | uint16_t((loc)[1]) << 8)
 
@@ -17,6 +19,7 @@ namespace Proto
 		CONNECT = 3,
 		UDP_CONNECTED = 4,
 		TCP_DISCONNECTED = 5,
+		TCP_ESTABLISHED = 6,
 	};
 	
 	enum class Protocol : unsigned char
@@ -24,6 +27,9 @@ namespace Proto
 		TCP = 0,
 		UDP = 1,
 	};
+
+	constexpr size_t tcp_message_header_size = 13;
+	constexpr size_t udp_message_header_size = 7;
 }
 
 #endif

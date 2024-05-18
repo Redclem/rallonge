@@ -1,6 +1,6 @@
-#include "server.h"
-#include "client.h"
 #include "socket.hpp"
+#include "client.h"
+#include "server.h"
 
 #include <cstdlib>
 #include <cstring>
