@@ -155,7 +155,23 @@ void Server::proc_loop()
 			{
 				m_message_buffer.resize(m_message_buffer.capacity());
 				auto recres = sck.sck.Recv_raw(m_message_buffer.data() + 7, m_message_buffer.size() - 7);
+#ifdef WIN32
+				if(recres < 0)
+				{
+					auto err = WSAGetLastError();
+					if(err == WSAECONNRESET)
+					{
+						LOG("UDP port unreachable on bridge " << bridge << std::endl);
+					}
+					else
+						{
+							std::cout << "err on UDP recv : " << err << std::endl;
+							throw std::runtime_error("Error on UDP recv");
+						}
+				}
+#else
 				CHECK_RET(recres >= 0);
+#endif
 
 				m_message_buffer.resize(recres + 7);
 

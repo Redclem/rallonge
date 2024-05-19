@@ -127,6 +127,7 @@ void Client::proc_loop()
 
 				Connection nco;
 				nco.sck = sck.accept();
+				nco.key = 0; // Will receive true value when connection established message is received
 				CHECK_RET(nco.sck.valid())
 
 				LOG("New connection on bridge " << bridge << ", key " << key_sock_uni_t(nco.sck.socket()) << std::endl);
@@ -147,7 +148,9 @@ void Client::proc_loop()
 				ENCODE_KEY(nco.sck.socket(), &msg[3])
 				ENCODE_KEY(unkey, &msg[11])
 
-				m_connections.emplace(ComKey{key_sock_uni_t(nco.sck.socket()), unkey}, std::move(nco));
+				ComKey ck{key_sock_uni_t(nco.sck.socket()), unkey};
+
+				m_connections.emplace(ck, std::move(nco));
 
 				CHECK_RET(m_tcp_proto_conn.Send(msg))
 
@@ -176,8 +179,25 @@ void Client::proc_loop()
 				}
 				else
 					recres = sck.sck.Recv_raw(m_message_buffer.data() + 7, m_message_buffer.size() - 7);
-
+#ifdef WIN32
+				if(recres < 0)
+				{
+					auto err = WSAGetLastError();
+					if(err == WSAECONNRESET)
+					{
+						LOG("UDP port unreachable on bridge " << bridge << std::endl);
+					}
+					else
+						{
+							std::cout << "err on UDP recv : " << err << std::endl;
+							throw std::runtime_error("Error on UDP recv");
+						}
+				}
+#else
 				CHECK_RET(recres >= 0);
+#endif
+
+
 
 				m_message_buffer.resize(7 + recres);
 
