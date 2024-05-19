@@ -7,7 +7,6 @@
 #include <iostream>
 #include <iterator>
 #include <stdexcept>
-#include <sys/socket.h>
 #include <tuple>
 #include <array>
 
@@ -216,20 +215,21 @@ void Server::process_tcp_message()
 		return;
 	case Proto::OpCode::MESSAGE:
 		{
-			std::array<unsigned char, 12> hdr;
+			std::array<unsigned char, 20> hdr;
 			CHECK_RET(m_tcp_proto_conn.Recv(hdr))
 
-			key_sock_t idx_cn = DECODE_KEY(hdr.data());
-			uint32_t dat_size = DECODE_UINT32(&hdr[8]);
+			ComKey comkey{DECODE_KEY(&hdr[0]), DECODE_KEY(&hdr[8])};
 
-			auto conn = m_connections.find(idx_cn);
+			uint32_t dat_size = DECODE_UINT32(&hdr[16]);
 
 			m_message_buffer.resize(dat_size);
 			CHECK_RET(m_tcp_proto_conn.Recv(m_message_buffer, MSG_WAITALL))
 
+			auto conn = m_connections.find(comkey);
+
 			if(conn == m_connections.end())
 			{
-				std::cout << "Message on dead connection " << idx_cn << std::endl;
+				LOG("Message on dead connection " << comkey.sk << std::endl);
 				return;
 			}
 
@@ -238,11 +238,12 @@ void Server::process_tcp_message()
 		}
 	case Proto::OpCode::CONNECT:
 		{
-			std::array<unsigned char, 10> bridge_dat;
+			std::array<unsigned char, 18> bridge_dat;
 			CHECK_RET(m_tcp_proto_conn.Recv(bridge_dat))
 			
 			uint16_t bridge = DECODE_UINT16(bridge_dat);
-			key_sock_t key = DECODE_KEY(&bridge_dat[2]);
+			key_sock_uni_t key = DECODE_KEY(&bridge_dat[2]);
+			key_sock_uni_t unkey = DECODE_KEY(&bridge_dat[10]);
 
 			Connection newcon{{}, key, m_pfds.size()};
 
@@ -252,17 +253,18 @@ void Server::process_tcp_message()
 			{
 				// Send established
 				
-				std::array<unsigned char, 17> msg_estab = {(unsigned char)(Proto::OpCode::TCP_ESTABLISHED)};
+				std::array<unsigned char, 25> msg_estab = {(unsigned char)(Proto::OpCode::TCP_ESTABLISHED)};
 				ENCODE_KEY(key, &msg_estab[1])
-				ENCODE_KEY(newcon.sck.socket(), &msg_estab[9])
+				ENCODE_KEY(unkey, &msg_estab[9])
+				ENCODE_KEY(newcon.sck.socket(), &msg_estab[17])
 
 				CHECK_RET(m_tcp_proto_conn.Send(msg_estab))
 
-				std::cout << "TCP bridge " << bridge << " connected, key " << key << ", " << newcon.sck.socket() << std::endl;
+				LOG("TCP bridge " << bridge << " connected, key " << key << ", " << newcon.sck.socket() << std::endl);
 
 				m_pfds.push_back({newcon.sck.socket(), POLLIN, 0});
 
-				m_connections.emplace(newcon.sck.socket(), std::move(newcon));
+				m_connections.emplace(ComKey{key_sock_uni_t(newcon.sck.socket()), unkey}, std::move(newcon));
 			}
 			else if(
 #ifdef __unix__
@@ -272,10 +274,11 @@ void Server::process_tcp_message()
 #endif
 			) {
 				// Connection refused
-				std::cout << "Connection refused on bridge " << bridge << ", key : " << key << std::endl;
-				std::array<unsigned char, 9> msg = {(unsigned char)(Proto::OpCode::TCP_DISCONNECTED)};
+				LOG("Connection refused on bridge " << bridge << ", key : " << key << std::endl);
+				std::array<unsigned char, 17> msg = {(unsigned char)(Proto::OpCode::TCP_DISCONNECTED)};
 
 				ENCODE_KEY(key, &msg[1]);
+				ENCODE_KEY(unkey, &msg[9]);
 				
 				m_tcp_proto_conn.Send(msg);
 
@@ -288,10 +291,10 @@ void Server::process_tcp_message()
 		}
 	case Proto::OpCode::TCP_DISCONNECTED:
 		{
-			std::array<unsigned char, 8> bridge_dat;
+			std::array<unsigned char, 16> bridge_dat;
 			CHECK_RET(m_tcp_proto_conn.Recv(bridge_dat))
 
-			disconnect_tcp<false>(DECODE_KEY(bridge_dat.data()));
+			disconnect_tcp<false>(ComKey{DECODE_KEY(&bridge_dat[0]), DECODE_KEY(&bridge_dat[8])});
 
 			return;
 		}

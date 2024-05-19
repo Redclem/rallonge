@@ -4,8 +4,9 @@ Except written otherwise, messages are valid client to server and server to clie
 Bridges configured are then identified by their index
 
 Once a TCP bridge is connected, the connected sockets are not called bridges anymore, but connections
-A connection is identified by its socket numbers, called keys, (i.e. the socket itself on unix (int) and win32 (SOCKET)) on client and server side
-the client side key is the ckey, the server key is the skey. Their byte order is irrelevant, they are treated as 8-byte sequences.
+
+A connection is identified by its socket numbers, called socket keys, (i.e. the socket itself on unix (int) and win32 (SOCKET)) extended to be 8-byte and a 8-byte unique key (same on both sides) on client and server side.
+The client side key is the ckey, the server key is the skey. Their byte order is irrelevant, they are treated as 8-byte sequences.
 
 Message codes (excluding initial port transmission over TCP):
 
@@ -23,23 +24,28 @@ Message codes (excluding initial port transmission over TCP):
 	* 2b : bridge index
 	* 4b : payload size
 	* ?b : payload
+
 	if TCP:
-	* 8b : connection index
+	* 8b : socket key
+	* 8b : unique key
 	* 4b: payload size
 	* ?b : payload
 
 - 3 : Connect (TCP only, client to server)
 	tcp connected to client endpoint, do the same on server endpoint
 	* 2b : bridge index
-	* 8b : ckey
+	* 8b : socket key
+	* 8b : unique key
 
 - 4 : UDP Connected (UDP only)
 
 - 5 : TCP Disconnected (TCP Only)
-	* 8b : ckey / skey (ckey if server-client, skey if client-server : key of the recipient)
+	* 8b : socket key (ckey if server-client, skey if client-server : key of the recipient)
+	* 8b : unique key
 
 - 6 : TCP Established (TCP Only, client to server)
 	* 8b : ckey 
+	* 8b : unique key
 	* 8b : skey
 
 ==============================================

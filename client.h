@@ -3,7 +3,6 @@
 
 #include "app_base.h"
 #include "socket.hpp"
-#include <iostream>
 
 
 class Client : public AppBase
@@ -13,8 +12,15 @@ class Client : public AppBase
 
 	std::vector<Socket> m_tcp_listener_sockets;
 
+	key_sock_uni_t m_next_key = 0;
 
-public:
+public:	
+
+	key_sock_uni_t next_unique_key()
+	{
+		return m_next_key++;
+	}
+
 	Client(const char * hostname, port_t port, const char * cfg_file) : 
 		m_hostname(hostname), m_config_path(cfg_file), m_tcp_port(port)
 	{}

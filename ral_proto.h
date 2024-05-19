@@ -28,7 +28,7 @@ namespace Proto
 		UDP = 1,
 	};
 
-	constexpr size_t tcp_message_header_size = 13;
+	constexpr size_t tcp_message_header_size = 21;
 	constexpr size_t udp_message_header_size = 7;
 }
 

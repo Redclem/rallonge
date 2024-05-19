@@ -44,9 +44,9 @@ void AppBase::discard_tcp_message()
 		return;
 	case Proto::OpCode::MESSAGE:
 		{
-			std::array<unsigned char, 6> head;
+			std::array<unsigned char, Proto::tcp_message_header_size> head;
 			CHECK_RET(m_tcp_proto_conn.Recv(head))
-			uint32_t len = DECODE_UINT32(head.data() + 2);
+			uint32_t len = DECODE_UINT32(head.data() + Proto::tcp_message_header_size - 4);
 
 			m_message_buffer.resize(len);
 			CHECK_RET(m_tcp_proto_conn.Recv(m_message_buffer));

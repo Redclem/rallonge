@@ -1,0 +1,4 @@
+tcp localhost 41334 localhost 42334
+tcp localhost 41344 localhost 42344
+udp localhost 41122 localhost 41123
+udp localhost 41222 localhost 41223

@@ -6,7 +6,6 @@
 #include <iostream>
 #include <array>
 #include <stdexcept>
-#include <sys/poll.h>
 
 void Client::run()
 {
@@ -130,7 +129,7 @@ void Client::proc_loop()
 				nco.sck = sck.accept();
 				CHECK_RET(nco.sck.valid())
 
-				std::cout << "New connection on bridge " << bridge << ", key " << nco.sck.socket() << std::endl;
+				LOG("New connection on bridge " << bridge << ", key " << key_sock_uni_t(nco.sck.socket()) << std::endl);
 
 				nco.pfd_index = m_pfds.size();
 
@@ -141,12 +140,14 @@ void Client::proc_loop()
 
 				// Do not poll for input before connection is confirmed
 
+				key_sock_uni_t unkey = next_unique_key();
 
-				std::array<unsigned char, 11> msg = {(unsigned char)(Proto::OpCode::CONNECT)};
+				std::array<unsigned char, 19> msg = {(unsigned char)(Proto::OpCode::CONNECT)};
 				ENCODE_UINT16(bridge, &msg[1])
 				ENCODE_KEY(nco.sck.socket(), &msg[3])
+				ENCODE_KEY(unkey, &msg[11])
 
-				m_connections.emplace(nco.sck.socket(), std::move(nco));
+				m_connections.emplace(ComKey{key_sock_uni_t(nco.sck.socket()), unkey}, std::move(nco));
 
 				CHECK_RET(m_tcp_proto_conn.Send(msg))
 
@@ -171,7 +172,7 @@ void Client::proc_loop()
 				{
 					recres = sck.sck.Recvfrom_raw(m_message_buffer.data() + 7, m_message_buffer.size() - 7, sck.addr);
 
-					std::cout << "First message on UDP bridge " << bridge << std::endl;
+					LOG("First message on UDP bridge " << bridge << std::endl)
 				}
 				else
 					recres = sck.sck.Recv_raw(m_message_buffer.data() + 7, m_message_buffer.size() - 7);
@@ -220,40 +221,55 @@ void Client::process_tcp_message()
 		return;
 	case Proto::OpCode::MESSAGE:
 		{
-			std::array<unsigned char, 12> hdr;
+			std::array<unsigned char, 20> hdr;
 			CHECK_RET(m_tcp_proto_conn.Recv(hdr))
 
-			key_sock_t conn = DECODE_KEY(hdr.data());
-			uint32_t dat_size = DECODE_UINT32(&hdr[8]);
+			ComKey ck{DECODE_KEY(&hdr[0]), DECODE_KEY(&hdr[8])};
+
+			uint32_t dat_size = DECODE_UINT32(&hdr[16]);
 
 			m_message_buffer.resize(dat_size);
 			CHECK_RET(m_tcp_proto_conn.Recv(m_message_buffer, MSG_WAITALL))
 
-			CHECK_RET(m_connections[conn].sck.Send(m_message_buffer))
+			auto iter_co = m_connections.find(ck);
+			
+			if(iter_co == m_connections.end())
+			{
+				LOG("Message on dead connection " << ck.sk << std::endl);
+				return;
+			}
+
+			CHECK_RET(iter_co->second.sck.Send(m_message_buffer))
 			return;
 		}
 	case Proto::OpCode::TCP_DISCONNECTED:
 		{
-			std::array<unsigned char, 8> bridge_dat;
+			std::array<unsigned char, 16> bridge_dat;
 			CHECK_RET(m_tcp_proto_conn.Recv(bridge_dat))
 
-			disconnect_tcp<false>(DECODE_KEY(bridge_dat.data()));
+			disconnect_tcp<false>({DECODE_KEY(&bridge_dat[0]), DECODE_KEY(&bridge_dat[8])});
 
 			return;
 		}
 	case Proto::OpCode::TCP_ESTABLISHED:
 		{
-			std::array<unsigned char, 16> keys;
+			std::array<unsigned char, 24> keys;
 
 			CHECK_RET(m_tcp_proto_conn.Recv(keys))
 
-			Connection & con = m_connections.at(DECODE_KEY(keys.data()));
+			auto iter_co = m_connections.find(ComKey{DECODE_KEY(&keys[0]), DECODE_KEY(&keys[8])});
 
-			con.key = DECODE_KEY(&keys[8]);
+			if(iter_co == m_connections.end())
+			{
+				LOG("Dead connection established" << std::endl);
+				return;
+			}
 
-			m_pfds[con.pfd_index].events = POLLIN;
+			iter_co->second.key = DECODE_KEY(&keys[16]);
 
-			std::cout << "Connection " << con.key << " established" << std::endl;
+			m_pfds[iter_co->second.pfd_index].events = POLLIN;
+
+			LOG("Connection " << iter_co->second.key << " established" << std::endl);
 		}
 		return;
 	case Proto::OpCode::CONNECT:
