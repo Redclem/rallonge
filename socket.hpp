@@ -276,7 +276,8 @@ public:
 
 	recv_res_t Recvfrom_raw(void * buf, size_t size, Address & addr, int flags = 0)
 	{
-		addr = Address(sizeof(sockaddr_in6));
+		if(addr.empty())
+			addr = Address(sizeof(sockaddr_in6));
 		return ::recvfrom(m_sck, reinterpret_cast<char*>(buf), size, flags, addr.m_sa, &addr.m_alen);
 	}
 

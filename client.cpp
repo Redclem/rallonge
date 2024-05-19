@@ -171,14 +171,8 @@ void Client::proc_loop()
 
 				decltype(sck.sck.Recv_raw(m_message_buffer.data() + 7, m_message_buffer.size() - 7)) recres;
 
-				if(sck.addr.empty())
-				{
-					recres = sck.sck.Recvfrom_raw(m_message_buffer.data() + 7, m_message_buffer.size() - 7, sck.addr);
+				recres = sck.sck.Recvfrom_raw(m_message_buffer.data() + 7, m_message_buffer.size() - 7, sck.addr);
 
-					LOG("First message on UDP bridge " << bridge << std::endl)
-				}
-				else
-					recres = sck.sck.Recv_raw(m_message_buffer.data() + 7, m_message_buffer.size() - 7);
 #ifdef WIN32
 				if(recres < 0)
 				{
