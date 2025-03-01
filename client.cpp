@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <array>
+#include <limits>
 #include <stdexcept>
 
 void Client::run()
@@ -27,38 +28,50 @@ void Client::initiate()
 	CHECK_RET(m_tcp_proto_conn.connect(tcp_srv))
 
 	std::cout << "Connected to server." << std::endl;
-	std::cout << "Creating UDP Socket ..." << std::endl;
+
+	auto bp = m_bypass_udp ? Proto::UDPBypass::BYPASS : Proto::UDPBypass::NO_BYPASS;
+	CHECK_RET(m_tcp_proto_conn.Send(bp));
+
+	if(!m_bypass_udp)
+	{
+		std::cout << "Creating UDP Socket ..." << std::endl;
+		
+		CHECK_RET(m_udp_proto_conn.create(AF_INET, SOCK_DGRAM))
+		CHECK_RET(m_udp_proto_conn.bind(Address(AF_INET, SOCK_DGRAM, "0.0.0.0", 0)))
+
+		auto [res, udp_plug_adr] = m_udp_proto_conn.getsockname();
+		CHECK_RET(res);
+
+		m_udp_port = udp_plug_adr.port();
+
+		std::cout << "UDP Socket created at port " << m_udp_port << ". Initializing connection..." << std::endl;
+
+		std::array<unsigned char, 2> port;
+
+		ENCODE_UINT16(m_udp_port, port)
+
+		CHECK_RET(m_tcp_proto_conn.Send(port))
+		CHECK_RET(m_tcp_proto_conn.Recv(port))
+
+		port_t client_udp_port = DECODE_UINT16(port);
+		m_proto_udp_address.set_port(client_udp_port);
+
+		std::cout << "TCP exchange OK." << std::endl;
 	
-	CHECK_RET(m_udp_proto_conn.create(AF_INET, SOCK_DGRAM))
-	CHECK_RET(m_udp_proto_conn.bind(Address(AF_INET, SOCK_DGRAM, "0.0.0.0", 0)))
+		std::cout << "Waiting for server UDP connection at port "
+			<< client_udp_port << std::endl;
 
-	auto [res, udp_plug_adr] = m_udp_proto_conn.getsockname();
-	CHECK_RET(res);
+		establish_udp_connection();
 
-	m_udp_port = udp_plug_adr.port();
-
-	std::cout << "UDP Socket created at port " << m_udp_port << ". Initializing connection..." << std::endl;
-
-	std::array<unsigned char, 2> port;
-
-	ENCODE_UINT16(m_udp_port, port)
-
-	CHECK_RET(m_tcp_proto_conn.Send(port))
-	CHECK_RET(m_tcp_proto_conn.Recv(port))
-	CHECK_RET(!port.empty());
-
-	port_t client_udp_port = DECODE_UINT16(port);
-	m_proto_udp_address.set_port(client_udp_port);
-
-	std::cout << "TCP exchange OK." << std::endl;
-	std::cout << "Waiting for server UDP connection at port "
-		<< client_udp_port << std::endl;
-
-	establish_udp_connection();
-
-	std::cout << "UDP connect OK." << std::endl;
+		std::cout << "UDP connect OK." << std::endl;
+	}
+	else
+	{
+		std::cout << "UDP bypass enabled." << std::endl;
+		m_next_ka_packet = std::numeric_limits<time_t>::max();
+	}
 	
-	m_pfds = {{m_tcp_proto_conn.socket(), POLLIN, 0}, {m_udp_proto_conn.socket(), POLLIN, 0}};
+	m_pfds = {{m_tcp_proto_conn.socket(), POLLIN, 0}, {m_udp_proto_conn.socket(), POLLIN, 0}};	
 }
 
 void Client::proc_loop()
@@ -169,9 +182,8 @@ void Client::proc_loop()
 			{
 				m_message_buffer.resize(m_message_buffer.capacity());
 
-				decltype(sck.sck.Recv_raw(m_message_buffer.data() + 7, m_message_buffer.size() - 7)) recres;
-
-				recres = sck.sck.Recvfrom_raw(m_message_buffer.data() + 7, m_message_buffer.size() - 7, sck.addr);
+				// Offset by 8 to ensure bypassed header fits
+				auto recres = sck.sck.Recvfrom_raw(m_message_buffer.data() + 8, m_message_buffer.size() - 8, sck.addr);
 
 #ifdef WIN32
 				if(recres < 0)
@@ -191,17 +203,8 @@ void Client::proc_loop()
 				CHECK_RET(recres >= 0);
 #endif
 
-
-
-				m_message_buffer.resize(7 + recres);
-
-				m_message_buffer[0] = (unsigned char)(Proto::OpCode::MESSAGE);
-
-				ENCODE_UINT16(bridge, m_message_buffer.data() + 1)
-				ENCODE_UINT32(recres, m_message_buffer.data() + 3)
-
-				m_udp_proto_conn.Sendto(m_message_buffer, m_proto_udp_address);
-
+				send_udp(bridge, recres);
+				
 				CHECK_RET(poll(&(*iter_pfd), 1, 0) >= 0)
 			}
 
@@ -235,6 +238,19 @@ void Client::process_tcp_message()
 		return;
 	case Proto::OpCode::MESSAGE:
 		{
+			if(m_bypass_udp) // Check proto!
+			{
+				Proto::Protocol p;
+				CHECK_RET(m_tcp_proto_conn.Recv(p));
+
+				if(p == Proto::Protocol::UDP) // It is UDP
+				{
+					process_bypassed_message();
+					return;
+				}
+				// Otherwise, do as usual...
+			}
+
 			std::array<unsigned char, 20> hdr;
 			CHECK_RET(m_tcp_proto_conn.Recv(hdr))
 

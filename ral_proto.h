@@ -28,8 +28,16 @@ namespace Proto
 		UDP = 1,
 	};
 
-	constexpr size_t tcp_message_header_size = 21;
-	constexpr size_t udp_message_header_size = 7;
-}
+	enum class UDPBypass : unsigned char
+	{
+		NO_BYPASS = 0,
+		BYPASS = 1,
+	};
+
+ 	// Header sizes for messages WITH message type and eventual protocol information
+
+	constexpr size_t tcp_message_header_size = 22;
+	constexpr size_t udp_message_header_size = 8;
+	}
 
 #endif

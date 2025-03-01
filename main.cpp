@@ -2,6 +2,7 @@
 #include "client.h"
 #include "server.h"
 
+#include <any>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -9,7 +10,10 @@
 constexpr const char * usage =
 	"Rallonge TCP / UDP tunnel\n\n"
 
-	"Usage : rallonge <client / server> <options>\n\n"
+	"Usage : rallonge <client / server> [client / server params] <options>\n\n"
+
+	"options:\n"
+	"\t--udp-bypass -ub\tbypass udp connection (transmit udp messages over tcp and do not establish udp connection\n\n"
 
 	"Client usage:\n"
 	"rallonge client <server hostname> <server port> <config file>\n\n"
@@ -37,13 +41,19 @@ int main(int argc, char * argv[])
 	{
 		if(strcmp(argv[1], "client") == 0)
 		{
-			if(argc != 5)
+			if(argc < 5)
 			{
 				std::cout << usage;
 				return 0;
 			}
 
-			Client cl(argv[2], port_t(atoi(argv[3])), argv[4]);
+			// Check if bypass
+			bool bp = std::any_of(argv + 5, argv + argc, [](const char * arg){
+				return strcmp(arg, "--udp-bypass") == 0 ||
+					strcmp(arg, "-ub") == 0;
+			});
+
+			Client cl(argv[2], port_t(atoi(argv[3])), argv[4], bp);
 			cl.run();
 		}
 		else if (strcmp(argv[1],  "server") == 0)

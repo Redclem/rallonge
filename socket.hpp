@@ -84,7 +84,7 @@ public:
 	~Address() {destroy();}
 
 	Address(int af, int socktype, const char * adr_str) {
-		addrinfo * pnfo, hint = {};
+		addrinfo * pnfo = nullptr, hint = {};
 		hint.ai_family = af;
 		hint.ai_socktype = socktype;
 
@@ -284,7 +284,12 @@ public:
 	template<typename Cont>
 	bool Recv(Cont & buf, int flags = 0)
 	{
-		int res = ::recv(m_sck, reinterpret_cast<char*>(buf.data()), buf.size(), flags);
+		int res;
+		if constexpr(std::is_class_v<Cont>)
+			res = ::recv(m_sck, reinterpret_cast<char*>(buf.data()), buf.size(), flags);
+		else
+			res = ::recv(m_sck, reinterpret_cast<char*>(&buf), sizeof(Cont), flags);
+
 		CHECK_RET(res != -1);
 		if constexpr(resizable<Cont>::value) buf.resize(res);
 		return true;
@@ -304,7 +309,15 @@ public:
 	template<typename Cont>
 	int Send(const Cont & buf, int flags = 0)
 	{
-		return ::send(m_sck, reinterpret_cast<const char*>(buf.data()), buf.size(), flags);
+		if constexpr (std::is_class_v<Cont>)
+			return ::send(m_sck, reinterpret_cast<const char*>(buf.data()), buf.size(), flags);
+		else
+			return ::send(m_sck, reinterpret_cast<const char*>(&buf), sizeof(Cont), flags);
+	}
+
+	int Send_raw(const void * data, size_t size, int flags = 0)
+	{
+		return ::send(m_sck, reinterpret_cast<const char*>(data), size, flags);
 	}
 	
 	template<typename Cont>

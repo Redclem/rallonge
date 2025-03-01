@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <type_traits>
 #include <vector>
 #include <array>
@@ -103,16 +104,26 @@ protected:
 	bool m_udp_established = false;
 	bool m_udp_est_resend = true;
 	bool m_run = true;
+	bool m_bypass_udp = false;
 public:
 
-	static constexpr size_t message_buffer_size = 16384;
+	static constexpr size_t message_buffer_size = 16384 + 8;
 
-	AppBase() : m_message_buffer(message_buffer_size) {}
+	AppBase(bool ub = false) : m_message_buffer(message_buffer_size), m_bypass_udp(ub) {
+		if(ub) set_bypass();
+	}
 
 	constexpr static int n_initial_messages = 16;
 	constexpr static time_t ka_interval = 5;
 
 protected:
+
+
+	// Enable bypass
+	void set_bypass()
+	{
+		m_next_ka_packet = std::numeric_limits<time_t>::max();
+	}
 
 
 	bool ka_message()
@@ -132,6 +143,12 @@ protected:
 
 	void establish_udp_connection();
 	void process_udp_message();
+	
+	// Call when it has been determined that a TCP message is bypassed and directed to udp
+	void process_bypassed_message();
+
+	// Call to process UDP message in message buffer. The buffer should have space for the header reserved (should be 8 bytes at time of writing).
+	void send_udp(uint16_t bridge, uint32_t size);
 
 	template<bool Message>
 	bool disconnect_tcp(ConnectionMap::iterator connex)
@@ -187,56 +204,7 @@ protected:
 		return disconnect_tcp<Message>(iter_sck);
 	}
 
-	bool check_conn_pfd(std::vector<pollfd>::iterator iter_pfd)
-	{
-		auto conn = m_connections.find(key_sock_uni_t(iter_pfd->fd));
-
-		while(iter_pfd->revents)
-		{
-			Socket::recv_res_t recres;
-
-			if(iter_pfd->revents & POLLERR)
-			{
-				recres = 0;
-			}
-			else
-			{
-				// If poll gives hangup, we still need to receive last data
-				// So we process hangup here if recres is 0
-
-				m_message_buffer.resize(m_message_buffer.capacity());
-				
-				recres = conn->second.sck.Recv_raw(m_message_buffer.data() + Proto::tcp_message_header_size, m_message_buffer.size() - Proto::tcp_message_header_size, 0);
-				CHECK_RET(recres >= 0);
-			}
-			
-			if(recres == 0) // Connection loss
-			{
-				LOG("Connection " << conn->first.sk << ',' << conn->second.key << " Hung up." << std::endl);
-				if(disconnect_tcp<true>(conn))
-					return true;
-
-				// The iter_sck structure has changed. Update connection and poll again.
-				conn = m_connections.find(key_sock_uni_t(iter_pfd->fd));
-			}
-			else // Message
-			{
-				m_message_buffer.resize(recres + Proto::tcp_message_header_size);
-				m_message_buffer[0] = (unsigned char)(Proto::OpCode::MESSAGE);
-
-				ENCODE_KEY(conn->second.key, &m_message_buffer[1])
-				ENCODE_KEY(conn->first.uk, &m_message_buffer[9])
-
-				ENCODE_UINT32(recres, &m_message_buffer[17])
-
-				CHECK_RET(m_tcp_proto_conn.Send(m_message_buffer))
-			}
-
-			CHECK_RET(poll(&(*iter_pfd), 1, 0) >= 0)
-		}
-
-		return false;
-	}
+	bool check_conn_pfd(std::vector<pollfd>::iterator iter_pfd);
 };
 
 

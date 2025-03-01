@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <stdexcept>
 #include <tuple>
 #include <array>
@@ -31,37 +32,51 @@ void Server::initiate()
 	CHECK_RET(m_tcp_proto_conn.valid())
 
 	std::cout << "Client connected : " << m_proto_udp_address.str() << std::endl;
-	std::cout << "Creating UDP Socket ..." << std::endl;
-	
-	CHECK_RET(m_udp_proto_conn.create(AF_INET, SOCK_DGRAM))
-	CHECK_RET(m_udp_proto_conn.bind(Address(AF_INET, SOCK_DGRAM, "0.0.0.0", 0)))
 
-	auto [res, udp_plug_adr] = m_udp_proto_conn.getsockname();
-	CHECK_RET(res);
+	Proto::UDPBypass ub;
+	CHECK_RET(m_tcp_proto_conn.Recv(ub));
+	m_bypass_udp = ub == Proto::UDPBypass::BYPASS;
 
-	m_udp_port = udp_plug_adr.port();
+	if(!m_bypass_udp)
+	{
 
-	std::cout << "UDP Socket created at port " << m_udp_port << ". Initializing connection..." << std::endl;
+		std::cout << "Creating UDP Socket ..." << std::endl;
+		
+		CHECK_RET(m_udp_proto_conn.create(AF_INET, SOCK_DGRAM))
+		CHECK_RET(m_udp_proto_conn.bind(Address(AF_INET, SOCK_DGRAM, "0.0.0.0", 0)))
 
-	std::array<unsigned char, 2> port;
+		auto [res, udp_plug_adr] = m_udp_proto_conn.getsockname();
+		CHECK_RET(res);
 
-	port[0] = m_udp_port;
-	port[1] = m_udp_port >> 8;
+		m_udp_port = udp_plug_adr.port();
 
-	CHECK_RET(m_tcp_proto_conn.Send(port))
-	CHECK_RET(m_tcp_proto_conn.Recv(port))
-	CHECK_RET(!port.empty());
+		std::cout << "UDP Socket created at port " << m_udp_port << ". Initializing connection..." << std::endl;
 
-	port_t client_udp_port = port[0] | port[1] << 8;
-	m_proto_udp_address.set_port(client_udp_port);
+		std::array<unsigned char, 2> port;
 
-	std::cout << "TCP exchange OK." << std::endl;
-	std::cout << "Waiting for client UDP connection at port "
-		<< client_udp_port << std::endl;
+		port[0] = m_udp_port;
+		port[1] = m_udp_port >> 8;
 
-	establish_udp_connection();
+		CHECK_RET(m_tcp_proto_conn.Send(port))
+		CHECK_RET(m_tcp_proto_conn.Recv(port))
+		CHECK_RET(!port.empty());
 
-	std::cout << "UDP connect OK." << std::endl;
+		port_t client_udp_port = port[0] | port[1] << 8;
+		m_proto_udp_address.set_port(client_udp_port);
+
+		std::cout << "TCP exchange OK." << std::endl;
+		std::cout << "Waiting for client UDP connection at port "
+			<< client_udp_port << std::endl;
+
+		establish_udp_connection();
+
+		std::cout << "UDP connect OK." << std::endl;
+	}
+	else
+	{
+		std::cout << "UDP bypass enabled." << std::endl;
+		set_bypass();
+	}
 
 	m_pfds = {{m_tcp_proto_conn.socket(), POLLIN, 0}, {m_udp_proto_conn.socket(), POLLIN, 0}};
 }
@@ -154,7 +169,7 @@ void Server::proc_loop()
 			while(iter_pfd->revents)
 			{
 				m_message_buffer.resize(m_message_buffer.capacity());
-				auto recres = sck.sck.Recv_raw(m_message_buffer.data() + 7, m_message_buffer.size() - 7);
+				auto recres = sck.sck.Recv_raw(m_message_buffer.data() + Proto::udp_message_header_size, m_message_buffer.size() - Proto::udp_message_header_size);
 #ifdef WIN32
 				if(recres < 0)
 				{
@@ -172,15 +187,7 @@ void Server::proc_loop()
 #else
 				CHECK_RET(recres >= 0);
 #endif
-
-				m_message_buffer.resize(recres + 7);
-
-				m_message_buffer[0] = (unsigned char)(Proto::OpCode::MESSAGE);
-
-				ENCODE_UINT16(bridge, m_message_buffer.data() + 1)
-				ENCODE_UINT32(recres, m_message_buffer.data() + 3)
-
-				m_udp_proto_conn.Sendto(m_message_buffer, m_proto_udp_address);
+				send_udp(bridge, recres);
 
 				CHECK_RET(poll(&(*iter_pfd), 1, 0) >= 0)
 			}
@@ -231,6 +238,19 @@ void Server::process_tcp_message()
 		return;
 	case Proto::OpCode::MESSAGE:
 		{
+			if(m_bypass_udp) // Check proto!
+			{
+				Proto::Protocol p;
+				CHECK_RET(m_tcp_proto_conn.Recv(p));
+
+				if(p == Proto::Protocol::UDP) // It is UDP
+				{
+					process_bypassed_message();
+					return;
+				}
+				// Otherwise, do as usual...
+			}
+
 			std::array<unsigned char, 20> hdr;
 			CHECK_RET(m_tcp_proto_conn.Recv(hdr))
 

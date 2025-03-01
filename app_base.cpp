@@ -151,3 +151,100 @@ void AppBase::process_udp_message()
 		throw NetworkError("Unexpected OpCode on UDP");
 	}
 }
+
+void AppBase::process_bypassed_message()
+{
+	std::array<char, 6> buf;
+	m_tcp_proto_conn.Recv(buf);
+
+	uint16_t bridge = DECODE_UINT16(buf.data());
+	uint32_t len = DECODE_UINT32(buf.data() + 2);
+
+	m_message_buffer.resize(len);
+	m_tcp_proto_conn.Recv(m_message_buffer);
+
+	m_udp_sockets[bridge].sck.Sendto(m_message_buffer, m_udp_sockets[bridge].addr);
+}
+
+void AppBase::send_udp(uint16_t bridge, uint32_t size)
+{
+	m_message_buffer.resize(size + Proto::udp_message_header_size);
+
+	ENCODE_UINT16(bridge, m_message_buffer.data() + 2)
+	ENCODE_UINT32(size, m_message_buffer.data() + 4)
+
+	if(m_bypass_udp)
+	{
+		m_message_buffer[1] = (unsigned char)(Proto::Protocol::UDP);
+		m_message_buffer[0] = (unsigned char)(Proto::OpCode::MESSAGE);
+
+		m_tcp_proto_conn.Send(m_message_buffer);
+	}
+	else
+	{
+		m_message_buffer[1] = (unsigned char)(Proto::OpCode::MESSAGE);
+
+		m_udp_proto_conn.Sendto_raw(m_message_buffer.data() + 1, m_message_buffer.size() - 1, m_proto_udp_address);
+	}
+}
+
+bool AppBase::check_conn_pfd(std::vector<pollfd>::iterator iter_pfd)
+	{
+		auto conn = m_connections.find(key_sock_uni_t(iter_pfd->fd));
+
+		while(iter_pfd->revents)
+		{
+			Socket::recv_res_t recres;
+
+			if(iter_pfd->revents & POLLERR)
+			{
+				recres = 0;
+			}
+			else
+			{
+				// If poll gives hangup, we still need to receive last data
+				// So we process hangup here if recres is 0
+
+				m_message_buffer.resize(m_message_buffer.capacity());
+				
+				recres = conn->second.sck.Recv_raw(m_message_buffer.data() + Proto::tcp_message_header_size, m_message_buffer.size() - Proto::tcp_message_header_size, 0);
+				CHECK_RET(recres >= 0);
+			}
+			
+			if(recres == 0) // Connection loss
+			{
+				LOG("Connection " << conn->first.sk << ',' << conn->second.key << " Hung up." << std::endl);
+				if(disconnect_tcp<true>(conn))
+					return true;
+
+				// The iter_sck structure has changed. Update connection and poll again.
+				conn = m_connections.find(key_sock_uni_t(iter_pfd->fd));
+			}
+			else // Message
+			{
+				m_message_buffer.resize(recres + Proto::tcp_message_header_size);
+
+				ENCODE_KEY(conn->second.key, &m_message_buffer[2])
+				ENCODE_KEY(conn->first.uk, &m_message_buffer[10])
+
+				ENCODE_UINT32(recres, &m_message_buffer[18])
+
+				if(m_bypass_udp)
+				{
+					m_message_buffer[1] = (unsigned char)(Proto::Protocol::TCP);
+					m_message_buffer[0] = (unsigned char)(Proto::OpCode::MESSAGE);
+					CHECK_RET(m_tcp_proto_conn.Send(m_message_buffer))
+				}
+				else
+				{
+					m_message_buffer[1] = (unsigned char)(Proto::OpCode::MESSAGE);
+					CHECK_RET(m_tcp_proto_conn.Send_raw(m_message_buffer.data() + 1, m_message_buffer.size() - 1));
+				}
+			}
+
+			CHECK_RET(poll(&(*iter_pfd), 1, 0) >= 0)
+		}
+
+		return false;
+	}
+

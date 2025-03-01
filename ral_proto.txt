@@ -1,5 +1,15 @@
+
 Except written otherwise, numbers (including ports) are encoded in little endian
 Except written otherwise, messages are valid client to server and server to client and on both protocols
+
+First transmission (TCP, client -> server)
+- 1b : UDP bypass information (ubi = BYPASS or NO_BYPASS)
+- 2b (if ubi == NO_BYPASS) : UDP port
+
+Second transmission (TCP, server -> client) (if no bypass)
+- 2b : UDP port
+
+After first transmission, if no bypass, UDP messages are exchanged to pierce hole through eventual NAT
 
 Bridges configured are then identified by their index
 
@@ -12,14 +22,16 @@ Message codes (excluding initial port transmission over TCP):
 
 - 0 : No-op
 
-- 1 : Config (configure a bridge, giving information on server-side endpoint)
+- 1 : Config (TCP, configure a bridge, giving information on server-side endpoint)
 	Client to server only
 	* 2b : message size (proto + dst port + target name with null term)
 	* 1b : protocol (0:TCP, 1:UDP)
 	* 2b : dst port
 	* ?b : target name, null-terminated
 
-- 2 : Message (any proto, the bridge is on the same proto as the message was transmitted)
+- 2 : Message (any proto, the bridge is on the same proto as the message was transmitted if udp bypass disabled)
+	* 1b : protocol (if bypass disabled)
+
 	if UDP:
 	* 2b : bridge index
 	* 4b : payload size
@@ -37,7 +49,7 @@ Message codes (excluding initial port transmission over TCP):
 	* 8b : socket key
 	* 8b : unique key
 
-- 4 : UDP Connected (UDP only)
+- 4 : UDP Connected (UDP only) (nat hole punching)
 
 - 5 : TCP Disconnected (TCP Only)
 	* 8b : socket key (ckey if server-client, skey if client-server : key of the recipient)

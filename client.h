@@ -21,7 +21,7 @@ public:
 		return m_next_key++;
 	}
 
-	Client(const char * hostname, port_t port, const char * cfg_file) : 
+	Client(const char * hostname, port_t port, const char * cfg_file, bool ub) : AppBase(ub),
 		m_hostname(hostname), m_config_path(cfg_file), m_tcp_port(port)
 	{}
 
