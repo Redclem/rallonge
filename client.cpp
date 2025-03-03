@@ -7,7 +7,6 @@
 #include <array>
 #include <limits>
 #include <stdexcept>
-#include <sys/poll.h>
 
 void Client::run()
 {
