@@ -100,8 +100,6 @@ void Server::proc_loop()
 		if(check_tcp_timeout())
 			on_timeout();
 
-		check_tcp_timeout();
-
 		auto rpoll = poll_pfds();
 		
 		if(rpoll == 0) continue;
