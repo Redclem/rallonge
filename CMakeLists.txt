@@ -19,6 +19,10 @@ target_link_libraries(rallonge Ws2_32.lib)
 
 endif()
 
+if(NOT DEFINED CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
+	set(CMAKE_BUILD_TYPE "Release")
+endif()
+
 if(${CMAKE_BUILD_TYPE} STREQUAL "Release")
 # Optimisation
 if(WIN32)

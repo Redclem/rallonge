@@ -20,6 +20,7 @@ namespace Proto
 		UDP_CONNECTED = 4,
 		TCP_DISCONNECTED = 5,
 		TCP_ESTABLISHED = 6,
+		TCP_TIMEOUT = 7,
 	};
 	
 	enum class Protocol : unsigned char

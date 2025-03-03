@@ -120,7 +120,6 @@ void AppBase::process_bypassed_message()
 	m_tcp_proto_conn.Recv(m_message_buffer, MSG_WAITALL);
 
 	m_udp_sockets[bridge].sck.Sendto(m_message_buffer, m_udp_sockets[bridge].addr);
-	LOG("Send UDP with size " << len << " from server")
 }
 
 void AppBase::send_udp(uint16_t bridge, uint32_t size)
@@ -143,6 +142,8 @@ void AppBase::send_udp(uint16_t bridge, uint32_t size)
 
 		m_udp_proto_conn.Sendto_raw(m_message_buffer.data() + 1, m_message_buffer.size() - 1, m_proto_udp_address);
 	}
+
+	update_udp_ka();
 }
 
 bool AppBase::check_conn_pfd(std::vector<pollfd>::iterator iter_pfd)

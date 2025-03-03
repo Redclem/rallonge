@@ -33,6 +33,10 @@ public:
 	void process_tcp_message();
 
 	void load_config();
+
+	void connect_proto_tcp();
+	
+	void on_timeout();
 };
 
 

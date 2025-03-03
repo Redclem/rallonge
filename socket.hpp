@@ -327,7 +327,10 @@ public:
 	template<typename Cont>
 	int Sendto(const Cont & buf, Address a, int flags = 0)
 	{
-		return ::sendto(m_sck, reinterpret_cast<const char*>(buf.data()), buf.size(), flags, a.m_sa, a.m_alen);
+		if constexpr (std::is_class_v<Cont>)
+			return ::sendto(m_sck, reinterpret_cast<const char*>(buf.data()), buf.size(), flags, a.m_sa, a.m_alen);
+		else
+			return ::sendto(m_sck, reinterpret_cast<const char*>(&buf), sizeof(Cont), flags, a.m_sa, a.m_alen);
 	}
 	
 	int Sendto_raw(const void * dat, size_t len, Address a, int flags = 0)

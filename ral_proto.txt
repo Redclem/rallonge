@@ -60,6 +60,8 @@ Message codes (excluding initial port transmission over TCP):
 	* 8b : unique key
 	* 8b : skey
 
+- 7 : Timeout (TCP Only) : indicate that the TCP stream between client and server timed out and will be reestablished.
+
 ==============================================
 
 Config file:

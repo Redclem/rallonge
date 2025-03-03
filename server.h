@@ -27,8 +27,10 @@ public:
 	void process_tcp_message();
 
 	void add_endpoint(Proto::Protocol proto, port_t dst_port, const char * hostname);
-
 	
+	void on_timeout();
+
+	void connect_proto_tcp();
 };
 
 #endif

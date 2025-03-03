@@ -17,17 +17,7 @@ void Client::run()
 
 void Client::initiate()
 {
-	Address tcp_srv(AF_INET, SOCK_STREAM, m_hostname, m_tcp_port);
-	m_proto_udp_address = tcp_srv;
-
-	CHECK_RET(m_tcp_proto_conn.create(AF_INET, SOCK_STREAM))
-
-	std::cout << "Connecting to server at " << m_hostname << ':'
-		<< m_tcp_port << " ..." << std::endl;
-
-	CHECK_RET(m_tcp_proto_conn.connect(tcp_srv))
-
-	std::cout << "Connected to server." << std::endl;
+	connect_proto_tcp();
 
 	auto bp = m_bypass_udp ? Proto::UDPBypass::BYPASS : Proto::UDPBypass::NO_BYPASS;
 	CHECK_RET(m_tcp_proto_conn.Send(bp));
@@ -68,27 +58,21 @@ void Client::initiate()
 	else
 	{
 		std::cout << "UDP bypass enabled." << std::endl;
-		m_next_ka_packet = std::numeric_limits<time_t>::max();
+		m_udp_ka_time = std::numeric_limits<time_t>::max();
 	}
 	
-	m_pfds = {{m_tcp_proto_conn.socket(), POLLIN, 0}, {m_udp_proto_conn.socket(), POLLIN, 0}};	
+	m_pfds = {{m_tcp_proto_conn.socket(), POLLIN, 0}, {m_udp_proto_conn.socket(), POLLIN, 0}};
+	m_last_tcp_packet = m_cur_time = time(nullptr);
 }
 
 void Client::proc_loop()
 {
 	while(m_run)
 	{
-		// Poll
-		int rpoll;
-		
-		// UDP Keepalive
-		if(ka_message())
-		{
-			std::array<Proto::OpCode, 1> ka{Proto::OpCode::NOP};
-			m_udp_proto_conn.Sendto(ka, m_proto_udp_address);
-		}
+		if(check_tcp_timeout())
+			on_timeout();
 
-		rpoll = poll(m_pfds.data(), m_pfds.size(), 5000);
+		auto rpoll = poll_pfds();
 		
 		if(rpoll == 0) continue;
 
@@ -235,6 +219,8 @@ void Client::process_tcp_message()
 		return;
 	}
 
+	m_last_tcp_packet = m_cur_time;
+
 	switch(Proto::OpCode(opcode[0]))
 	{
 	case Proto::OpCode::NOP:
@@ -304,6 +290,9 @@ void Client::process_tcp_message()
 
 			LOG("Connection " << iter_co->second.key << " established" << std::endl);
 		}
+		return;
+	case Proto::OpCode::TCP_TIMEOUT:
+		connect_proto_tcp();
 		return;
 	case Proto::OpCode::CONNECT:
 	case Proto::OpCode::UDP_CONNECTED:
@@ -383,4 +372,31 @@ void Client::load_config()
 		throw std::runtime_error("Error reading config file");
 
 	std::cout << "Configuration loaded successfully." << std::endl;
+}
+
+void Client::connect_proto_tcp()
+{
+	Address tcp_srv(AF_INET, SOCK_STREAM, m_hostname, m_tcp_port);
+	m_proto_udp_address = tcp_srv;
+
+	CHECK_RET(m_tcp_proto_conn.create(AF_INET, SOCK_STREAM))
+
+	std::cout << "Connecting to server at " << m_hostname << ':'
+		<< m_tcp_port << " ..." << std::endl;
+
+	CHECK_RET(m_tcp_proto_conn.connect(tcp_srv))
+
+	std::cout << "Connected to server." << std::endl;
+}
+
+void Client::on_timeout()
+{
+	std::cout << "Timeout!" << std::endl;
+
+	m_connections.clear();
+	m_pfds.resize(2 + m_udp_sockets.size() + m_tcp_listener_sockets.size());
+
+	m_tcp_proto_conn.destroy();
+	connect_proto_tcp();
+	m_last_tcp_packet = m_cur_time = time(nullptr);
 }

@@ -97,8 +97,9 @@ protected:
 	ConnectionMap m_connections;
 
 
-
-	time_t m_next_ka_packet = 0;
+	time_t m_cur_time = 0; // Time to be updated after poll
+	time_t m_udp_ka_time = 0, m_tcp_ka_time = 0;
+	time_t m_last_tcp_packet = 0; // Last TCP ka received
 
 	uint16_t m_udp_port;
 	bool m_udp_established = false;
@@ -114,7 +115,9 @@ public:
 	}
 
 	constexpr static int n_initial_messages = 16;
-	constexpr static time_t ka_interval = 5;
+	constexpr static time_t udp_ka_interval = 5;
+	constexpr static time_t tcp_ka_interval = 2;
+	constexpr static time_t tcp_timeout = tcp_ka_interval + 2;
 
 protected:
 
@@ -123,19 +126,7 @@ protected:
 	// Enable bypass
 	void set_bypass()
 	{
-		m_next_ka_packet = std::numeric_limits<time_t>::max();
-	}
-
-
-	bool ka_message()
-	{
-		auto t = time(nullptr);
-		if(t >= m_next_ka_packet)
-		{
-			m_next_ka_packet = t + ka_interval;
-			return true;
-		}
-		return false;
+		m_udp_ka_time = std::numeric_limits<time_t>::max();
 	}
 	
 
@@ -205,6 +196,77 @@ protected:
 	}
 
 	bool check_conn_pfd(std::vector<pollfd>::iterator iter_pfd);
+
+	void check_keepalives()
+	{
+		// UDP Keepalive
+		if(udp_ka_message())
+		{
+			Proto::OpCode ka{Proto::OpCode::NOP};
+			m_udp_proto_conn.Sendto(ka, m_proto_udp_address);
+		}
+		// TCP Keepalive
+		if(tcp_ka_message())
+		{
+			Proto::OpCode ka{Proto::OpCode::NOP};
+			m_tcp_proto_conn.Send(ka);
+		}
+	}
+
+
+	bool udp_ka_message()
+	{
+		auto t = time(nullptr);
+		if(t >= m_udp_ka_time)
+		{
+			m_udp_ka_time = t + udp_ka_interval;
+			return true;
+		}
+		return false;
+	}
+
+
+	bool tcp_ka_message()
+	{
+		auto t = time(nullptr);
+		if(t >= m_tcp_ka_time)
+		{
+			m_tcp_ka_time = t + tcp_ka_interval;
+			return true;
+		}
+		return false;
+	}
+
+	void update_tcp_ka()
+	{
+		m_tcp_ka_time = time(nullptr) + tcp_ka_interval;
+	}
+
+	void update_udp_ka()
+	{
+		m_udp_ka_time = time(nullptr) + udp_ka_interval;
+	}
+
+	auto poll_pfds()
+	{
+		constexpr auto poll_time = std::min(tcp_ka_interval, udp_ka_interval) * 1000;	
+		
+		// Poll
+		int rpoll;
+
+		rpoll = poll(m_pfds.data(), m_pfds.size(), poll_time);
+
+		m_cur_time = time(nullptr);
+
+		check_keepalives();
+		
+		return rpoll;
+	}
+	
+	bool check_tcp_timeout()
+	{
+		return m_cur_time >= m_last_tcp_packet + tcp_timeout;
+	}
 };
 
 

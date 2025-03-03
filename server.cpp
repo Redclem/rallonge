@@ -3,6 +3,7 @@
 #include "ral_proto.h"
 #include "socket.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <iostream>
 #include <iterator>
@@ -19,19 +20,7 @@ void Server::run()
 
 void Server::initiate()
 {
-	Socket tcp_plug;
-	Address tcp_adr_rec(AF_INET, SOCK_STREAM, "0.0.0.0", m_tcp_port);
-
-	CHECK_RET(tcp_plug.create(AF_INET, SOCK_STREAM))
-	CHECK_RET(tcp_plug.bind(tcp_adr_rec))
-
-	std::cout << "Listening on port " << m_tcp_port << ". Waiting for client." << std::endl;
-
-	CHECK_RET(tcp_plug.listen(1))
-	std::tie(m_tcp_proto_conn, m_proto_udp_address) = tcp_plug.accept_addr();
-	CHECK_RET(m_tcp_proto_conn.valid())
-
-	std::cout << "Client connected : " << m_proto_udp_address.str() << std::endl;
+	connect_proto_tcp();
 
 	Proto::UDPBypass ub;
 	CHECK_RET(m_tcp_proto_conn.Recv(ub));
@@ -39,7 +28,6 @@ void Server::initiate()
 
 	if(!m_bypass_udp)
 	{
-
 		std::cout << "Creating UDP Socket ..." << std::endl;
 		
 		CHECK_RET(m_udp_proto_conn.create(AF_INET, SOCK_DGRAM))
@@ -79,6 +67,7 @@ void Server::initiate()
 	}
 
 	m_pfds = {{m_tcp_proto_conn.socket(), POLLIN, 0}, {m_udp_proto_conn.socket(), POLLIN, 0}};
+	m_last_tcp_packet = m_cur_time = time(nullptr);
 }
 
 void Server::add_endpoint(Proto::Protocol proto, port_t dst_port, const char * hostname)
@@ -108,17 +97,12 @@ void Server::proc_loop()
 {
 	while(m_run)
 	{
-		// Poll
-		int rpoll;
-		
-		// UDP Keepalive
-		if(ka_message())
-		{
-			std::array<Proto::OpCode, 1> ka{Proto::OpCode::NOP};
-			m_udp_proto_conn.Sendto(ka, m_proto_udp_address);
-		}
+		if(check_tcp_timeout())
+			on_timeout();
 
-		rpoll = poll(m_pfds.data(), m_pfds.size(), 5000);
+		check_tcp_timeout();
+
+		auto rpoll = poll_pfds();
 		
 		if(rpoll == 0) continue;
 
@@ -220,6 +204,8 @@ void Server::process_tcp_message()
 		m_tcp_proto_conn.destroy();
 		return;
 	}
+
+	m_last_tcp_packet = m_cur_time;	
 
 	switch(Proto::OpCode(opcode[0]))
 	{
@@ -336,10 +322,40 @@ void Server::process_tcp_message()
 
 			return;
 		}
+	case Proto::OpCode::TCP_TIMEOUT:
+		connect_proto_tcp();
+		return;
 	default:
 	case Proto::OpCode::UDP_CONNECTED:
 		throw NetworkError("Unexpected OpCode on TCP");
 	}
 }
 
+void Server::on_timeout()
+{
+	std::cout << "Timeout!" << std::endl;
 
+	m_connections.clear();
+	m_pfds.resize(2 + m_udp_sockets.size());
+	// Reset established TCPS
+	m_tcp_proto_conn.destroy();
+	connect_proto_tcp();
+	m_last_tcp_packet = m_cur_time = time(nullptr);
+}
+
+void Server::connect_proto_tcp()
+{
+	Socket tcp_plug;
+	Address tcp_adr_rec(AF_INET, SOCK_STREAM, "0.0.0.0", m_tcp_port);
+
+	CHECK_RET(tcp_plug.create(AF_INET, SOCK_STREAM))
+	CHECK_RET(tcp_plug.bind(tcp_adr_rec))
+
+	std::cout << "Listening on port " << m_tcp_port << ". Waiting for client." << std::endl;
+
+	CHECK_RET(tcp_plug.listen(1))
+	std::tie(m_tcp_proto_conn, m_proto_udp_address) = tcp_plug.accept_addr();
+	CHECK_RET(m_tcp_proto_conn.valid())
+
+	std::cout << "Client connected : " << m_proto_udp_address.str() << std::endl;
+}
