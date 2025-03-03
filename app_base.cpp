@@ -33,50 +33,6 @@ void AppBase::discard_udp_message()
 	}
 }
 
-void AppBase::discard_tcp_message()
-{
-	std::array<unsigned char, 1> opcode;
-	CHECK_RET(m_tcp_proto_conn.Recv(opcode))
-
-	switch(Proto::OpCode(opcode[0]))
-	{
-	case Proto::OpCode::NOP:
-		return;
-	case Proto::OpCode::MESSAGE:
-		{
-			std::array<unsigned char, Proto::tcp_message_header_size> head;
-			CHECK_RET(m_tcp_proto_conn.Recv(head))
-			uint32_t len = DECODE_UINT32(head.data() + Proto::tcp_message_header_size - 4);
-
-			m_message_buffer.resize(len);
-			CHECK_RET(m_tcp_proto_conn.Recv(m_message_buffer));
-			return;
-		}
-	case Proto::OpCode::CONFIG:
-		{
-			std::cout << "WARNING : TCP config message discarded !" << std::endl;
-
-			std::array<unsigned char, 2> head;
-			CHECK_RET(m_tcp_proto_conn.Recv(head))
-			uint16_t len = DECODE_UINT16(head);
-
-			m_message_buffer.resize(len);
-			CHECK_RET(m_tcp_proto_conn.Recv(m_message_buffer))
-		}
-		return;
-		
-	case Proto::OpCode::CONNECT:
-		{
-			std::array<unsigned char, 2> trash;
-			CHECK_RET(m_tcp_proto_conn.Recv(trash))
-		}
-		return;
-	case Proto::OpCode::UDP_CONNECTED:
-	default:
-		throw NetworkError("Unexpected OpCode on TCP");
-	}
-}
-
 void AppBase::establish_udp_connection()
 {
 
@@ -102,7 +58,7 @@ void AppBase::establish_udp_connection()
 		{
 			pres = poll(&pfd, 1, 10);
 
-			if(pfd.revents)
+			if(pfd.revents & pollmask)
 			{
 				pfd.revents = 0;
 				discard_udp_message();
@@ -154,16 +110,17 @@ void AppBase::process_udp_message()
 
 void AppBase::process_bypassed_message()
 {
-	std::array<char, 6> buf;
+	std::array<unsigned char, 6> buf;
 	m_tcp_proto_conn.Recv(buf);
 
 	uint16_t bridge = DECODE_UINT16(buf.data());
 	uint32_t len = DECODE_UINT32(buf.data() + 2);
 
 	m_message_buffer.resize(len);
-	m_tcp_proto_conn.Recv(m_message_buffer);
+	m_tcp_proto_conn.Recv(m_message_buffer, MSG_WAITALL);
 
 	m_udp_sockets[bridge].sck.Sendto(m_message_buffer, m_udp_sockets[bridge].addr);
+	LOG("Send UDP with size " << len << " from server")
 }
 
 void AppBase::send_udp(uint16_t bridge, uint32_t size)
@@ -192,7 +149,7 @@ bool AppBase::check_conn_pfd(std::vector<pollfd>::iterator iter_pfd)
 	{
 		auto conn = m_connections.find(key_sock_uni_t(iter_pfd->fd));
 
-		while(iter_pfd->revents)
+		while(iter_pfd->revents & pollmask)
 		{
 			Socket::recv_res_t recres;
 

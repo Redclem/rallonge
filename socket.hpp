@@ -20,6 +20,8 @@ constexpr auto close_socket = close;
 
 constexpr socket_t null_socket = 0;
 
+constexpr short pollmask = 0xffff;
+
 #define net_err errno
 
 #endif
@@ -34,6 +36,8 @@ typedef u_short port_t;
 
 constexpr auto close_socket = closesocket;
 constexpr auto poll = WSAPoll;
+
+constexpr SHORT pollmask = ~(SHORT(POLLNVAL));
 
 constexpr socket_t null_socket = INVALID_SOCKET;
 

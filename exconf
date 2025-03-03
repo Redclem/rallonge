@@ -1,1 +1,1 @@
-tcp localhost 32400 example.com 443
+udp localhost 32400 localhost 32401

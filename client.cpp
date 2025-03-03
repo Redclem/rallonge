@@ -96,7 +96,7 @@ void Client::proc_loop()
 
 		// Check server TCP / UDP
 		
-		while(m_pfds.front().revents)
+		while(m_pfds.front().revents & pollmask)
 		{
 			if(m_pfds.front().revents & (POLLERR | POLLHUP))
 			{
@@ -120,12 +120,14 @@ void Client::proc_loop()
 		// pfd vector won't change ahead
 
 		auto iter_pfd = std::next(m_pfds.begin());
-
-		while(iter_pfd->revents)
+		
+		
+		while (iter_pfd->revents & pollmask)
 		{
 			process_udp_message();
 			CHECK_RET(poll(&(*iter_pfd), 1, 0) >= 0)
 		}
+		
 		iter_pfd++;
 
 		// Check endpoints
@@ -134,7 +136,7 @@ void Client::proc_loop()
 		uint16_t bridge(0);
 		for(auto & sck : m_tcp_listener_sockets)
 		{
-			while(iter_pfd->revents)
+			while(iter_pfd->revents & pollmask)
 			{
 				// Add a connection
 
@@ -178,12 +180,12 @@ void Client::proc_loop()
 		bridge = 0;
 		for(auto & sck : m_udp_sockets)
 		{
-			while(iter_pfd->revents)
+			while(iter_pfd->revents & pollmask)
 			{
 				m_message_buffer.resize(m_message_buffer.capacity());
 
 				// Offset by 8 to ensure bypassed header fits
-				auto recres = sck.sck.Recvfrom_raw(m_message_buffer.data() + 8, m_message_buffer.size() - 8, sck.addr);
+				auto recres = sck.sck.Recvfrom_raw(m_message_buffer.data() + Proto::udp_message_header_size, m_message_buffer.size() - Proto::udp_message_header_size, sck.addr);
 
 #ifdef WIN32
 				if(recres < 0)
@@ -202,6 +204,7 @@ void Client::proc_loop()
 #else
 				CHECK_RET(recres >= 0);
 #endif
+				LOG("Sending UDP with size " << recres << " to server" << std::endl)
 
 				send_udp(bridge, recres);
 				

@@ -2,7 +2,7 @@
 #include "client.h"
 #include "server.h"
 
-#include <any>
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -58,14 +58,16 @@ int main(int argc, char * argv[])
 		}
 		else if (strcmp(argv[1],  "server") == 0)
 		{
-			if(argc != 3)
-			{
-				std::cout << usage;
-				return 0;
-			}
-
-			Server srv(port_t(atoi(argv[2])));
-			srv.run();
+				if(argc != 3)
+				{
+					std::cout << usage;
+					return 0;
+				}
+				while (true)
+				{
+					Server srv(port_t(atoi(argv[2])));
+					srv.run();
+				}
 		}
 		else
 		{

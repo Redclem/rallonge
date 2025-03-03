@@ -118,6 +118,7 @@ public:
 
 protected:
 
+#undef max
 
 	// Enable bypass
 	void set_bypass()
@@ -139,7 +140,6 @@ protected:
 	
 
 	void discard_udp_message();
-	void discard_tcp_message();
 
 	void establish_udp_connection();
 	void process_udp_message();

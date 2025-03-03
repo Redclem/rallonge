@@ -127,7 +127,7 @@ void Server::proc_loop()
 
 		// Check client TCP / UDP
 		
-		while(m_pfds.front().revents)
+		while(m_pfds.front().revents & pollmask)
 		{
 			if(m_pfds.front().revents & (POLLERR | POLLHUP))
 			{
@@ -152,11 +152,13 @@ void Server::proc_loop()
 
 		auto iter_pfd = std::next(m_pfds.begin());
 
-		while(iter_pfd->revents)
+		
+		while (iter_pfd->revents & pollmask)
 		{
 			process_udp_message();
 			CHECK_RET(poll(&(*iter_pfd), 1, 0) >= 0)
 		}
+		
 		iter_pfd++;
 
 		// Check endpoints
@@ -166,7 +168,7 @@ void Server::proc_loop()
 		uint16_t bridge = 0;
 		for(auto & sck : m_udp_sockets)
 		{
-			while(iter_pfd->revents)
+			while(iter_pfd->revents & pollmask)
 			{
 				m_message_buffer.resize(m_message_buffer.capacity());
 				auto recres = sck.sck.Recv_raw(m_message_buffer.data() + Proto::udp_message_header_size, m_message_buffer.size() - Proto::udp_message_header_size);
