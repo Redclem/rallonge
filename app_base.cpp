@@ -206,3 +206,18 @@ bool AppBase::check_conn_pfd(std::vector<pollfd>::iterator iter_pfd)
 		return false;
 	}
 
+void AppBase::create_udp_socket()
+{	
+	std::cout << "Creating UDP Socket ..." << std::endl;
+	CHECK_RET(m_udp_proto_conn.create(AF_INET, SOCK_DGRAM))
+	CHECK_RET(m_udp_proto_conn.bind(Address(AF_INET, SOCK_DGRAM, "0.0.0.0", 0)))
+
+	auto [res, udp_plug_adr] = m_udp_proto_conn.getsockname();
+	CHECK_RET(res);
+
+	m_udp_port = udp_plug_adr.port();
+
+	std::cout << "UDP Socket created at port " << m_udp_port << '.' << std::endl;
+
+	m_pfds[1].fd = m_udp_proto_conn.socket();
+}

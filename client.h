@@ -34,9 +34,12 @@ public:
 
 	void load_config();
 
-	void connect_proto_tcp();
+	bool connect_proto_tcp(bool fresh = true);
 	
 	void on_timeout();
+
+	// Initilization after connecting tcp and establishing if connection is fresh
+	void init_post_connection();
 };
 
 

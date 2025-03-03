@@ -2,7 +2,11 @@
 Except written otherwise, numbers (including ports) are encoded in little endian
 Except written otherwise, messages are valid client to server and server to client and on both protocols
 
-First transmission (TCP, client -> server)
+When connecting : send byte to determine if the connection is fresh or if it is a resume after timeout
+Connection indicator (TCP, client -> server and server -> client)
+- 1b : connection indicator
+
+Config transmission (TCP, client -> server)
 - 1b : UDP bypass information (ubi = BYPASS or NO_BYPASS)
 - 2b (if ubi == NO_BYPASS) : UDP port
 

@@ -35,6 +35,12 @@ namespace Proto
 		BYPASS = 1,
 	};
 
+	enum class Connection : unsigned char
+	{
+		FRESH = 0,
+		RESUME = 1,
+	};
+
  	// Header sizes for messages WITH message type and eventual protocol information
 
 	constexpr size_t tcp_message_header_size = 22;

@@ -85,6 +85,8 @@ public:
 		using std::equal_to<ComKey>::operator();
 	};
 
+	void create_udp_socket();
+
 	typedef std::unordered_map<ComKey, Connection, CKHash, CKEq> ConnectionMap;
 
 protected:

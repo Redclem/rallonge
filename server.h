@@ -30,7 +30,10 @@ public:
 	
 	void on_timeout();
 
-	void connect_proto_tcp();
+	bool connect_proto_tcp(bool fresh);
+
+	// Initilization after connecting tcp and establishing if connection is fresh
+	void init_post_connection();
 };
 
 #endif

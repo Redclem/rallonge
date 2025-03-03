@@ -7,7 +7,6 @@
 #include <cerrno>
 #include <iostream>
 #include <iterator>
-#include <limits>
 #include <stdexcept>
 #include <tuple>
 #include <array>
@@ -20,7 +19,9 @@ void Server::run()
 
 void Server::initiate()
 {
-	connect_proto_tcp();
+	m_pfds = {{0, POLLIN, 0}, {0, POLLIN, 0}};
+
+	connect_proto_tcp(true);
 
 	Proto::UDPBypass ub;
 	CHECK_RET(m_tcp_proto_conn.Recv(ub));
@@ -28,18 +29,45 @@ void Server::initiate()
 
 	if(!m_bypass_udp)
 	{
-		std::cout << "Creating UDP Socket ..." << std::endl;
-		
-		CHECK_RET(m_udp_proto_conn.create(AF_INET, SOCK_DGRAM))
-		CHECK_RET(m_udp_proto_conn.bind(Address(AF_INET, SOCK_DGRAM, "0.0.0.0", 0)))
+		create_udp_socket();
+	}
 
-		auto [res, udp_plug_adr] = m_udp_proto_conn.getsockname();
-		CHECK_RET(res);
+	init_post_connection();
 
-		m_udp_port = udp_plug_adr.port();
+	m_last_tcp_packet = m_cur_time = time(nullptr);
+}
 
-		std::cout << "UDP Socket created at port " << m_udp_port << ". Initializing connection..." << std::endl;
+bool Server::connect_proto_tcp(bool fresh)
+{
+	Socket tcp_plug;
+	Address tcp_adr_rec(AF_INET, SOCK_STREAM, "0.0.0.0", m_tcp_port);
 
+	CHECK_RET(tcp_plug.create(AF_INET, SOCK_STREAM))
+	CHECK_RET(tcp_plug.bind(tcp_adr_rec))
+
+	std::cout << "Listening on port " << m_tcp_port << ". Waiting for client." << std::endl;
+
+	CHECK_RET(tcp_plug.listen(1))
+	std::tie(m_tcp_proto_conn, m_proto_udp_address) = tcp_plug.accept_addr();
+	CHECK_RET(m_tcp_proto_conn.valid())
+
+	std::cout << "Client connected : " << m_proto_udp_address.str() << std::endl;
+
+	m_pfds.front().fd = m_tcp_proto_conn.socket();
+
+
+	Proto::Connection cn(fresh ? Proto::Connection::FRESH : Proto::Connection::RESUME);
+	m_tcp_proto_conn.Send(cn);
+	m_tcp_proto_conn.Recv(cn);
+	return cn == Proto::Connection::FRESH;
+}
+
+void Server::init_post_connection()
+{
+	std::cout << "Initializing connection" << std::endl;
+
+	if(!m_bypass_udp)
+	{
 		std::array<unsigned char, 2> port;
 
 		port[0] = m_udp_port;
@@ -65,9 +93,6 @@ void Server::initiate()
 		std::cout << "UDP bypass enabled." << std::endl;
 		set_bypass();
 	}
-
-	m_pfds = {{m_tcp_proto_conn.socket(), POLLIN, 0}, {m_udp_proto_conn.socket(), POLLIN, 0}};
-	m_last_tcp_packet = m_cur_time = time(nullptr);
 }
 
 void Server::add_endpoint(Proto::Protocol proto, port_t dst_port, const char * hostname)
@@ -111,13 +136,16 @@ void Server::proc_loop()
 		
 		while(m_pfds.front().revents & pollmask)
 		{
-			if(m_pfds.front().revents & (POLLERR | POLLHUP))
+			if(m_pfds.front().revents & (POLLIN | POLLRDNORM))
+			{
+				process_tcp_message();
+			}
+			else if(m_pfds.front().revents & (POLLERR | POLLHUP))
 			{
 				std::cout << "Client disconnected. Quitting." << std::endl;
 				return;
 			}
 
-			process_tcp_message();
 
 			if(!m_tcp_proto_conn.valid())
 			{
@@ -321,7 +349,7 @@ void Server::process_tcp_message()
 			return;
 		}
 	case Proto::OpCode::TCP_TIMEOUT:
-		connect_proto_tcp();
+		on_timeout();
 		return;
 	default:
 	case Proto::OpCode::UDP_CONNECTED:
@@ -337,23 +365,30 @@ void Server::on_timeout()
 	m_pfds.resize(2 + m_udp_sockets.size());
 	// Reset established TCPS
 	m_tcp_proto_conn.destroy();
-	connect_proto_tcp();
+	
+	if(connect_proto_tcp(false))
+	{
+		m_udp_sockets.clear();
+		m_connections.clear();
+		m_pfds.resize(2);
+
+		Proto::UDPBypass ub;
+		CHECK_RET(m_tcp_proto_conn.Recv(ub));
+		m_bypass_udp = ub == Proto::UDPBypass::BYPASS;
+
+		if(!m_bypass_udp && !m_udp_proto_conn.valid())
+		{
+			create_udp_socket();
+			m_pfds[1].fd = m_udp_proto_conn.socket();
+		}
+		else if(m_bypass_udp)
+			m_pfds[0].fd = 0;
+		
+		init_post_connection();
+	}
+
+	
+	m_pfds.front().fd = m_tcp_proto_conn.socket();
+	
 	m_last_tcp_packet = m_cur_time = time(nullptr);
-}
-
-void Server::connect_proto_tcp()
-{
-	Socket tcp_plug;
-	Address tcp_adr_rec(AF_INET, SOCK_STREAM, "0.0.0.0", m_tcp_port);
-
-	CHECK_RET(tcp_plug.create(AF_INET, SOCK_STREAM))
-	CHECK_RET(tcp_plug.bind(tcp_adr_rec))
-
-	std::cout << "Listening on port " << m_tcp_port << ". Waiting for client." << std::endl;
-
-	CHECK_RET(tcp_plug.listen(1))
-	std::tie(m_tcp_proto_conn, m_proto_udp_address) = tcp_plug.accept_addr();
-	CHECK_RET(m_tcp_proto_conn.valid())
-
-	std::cout << "Client connected : " << m_proto_udp_address.str() << std::endl;
 }

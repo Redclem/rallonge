@@ -7,6 +7,7 @@
 #include <array>
 #include <limits>
 #include <stdexcept>
+#include <sys/poll.h>
 
 void Client::run()
 {
@@ -17,24 +18,50 @@ void Client::run()
 
 void Client::initiate()
 {
-	connect_proto_tcp();
+	m_pfds = {{0, POLLIN, 0}, {0, POLLIN, 0}};
+	
+	connect_proto_tcp(true);
 
+	if(!m_bypass_udp)
+	{
+		create_udp_socket();
+	}
+
+	init_post_connection();
+	
+	m_last_tcp_packet = m_cur_time = time(nullptr);
+}
+
+bool Client::connect_proto_tcp(bool fresh)
+{
+	Address tcp_srv(AF_INET, SOCK_STREAM, m_hostname, m_tcp_port);
+	m_proto_udp_address = tcp_srv;
+
+	CHECK_RET(m_tcp_proto_conn.create(AF_INET, SOCK_STREAM))
+
+	std::cout << "Connecting to server at " << m_hostname << ':'
+		<< m_tcp_port << " ..." << std::endl;
+
+	CHECK_RET(m_tcp_proto_conn.connect(tcp_srv))
+
+	std::cout << "Connected to server." << std::endl;
+
+	m_pfds.front().fd = m_tcp_proto_conn.socket();
+
+	Proto::Connection cn(fresh ? Proto::Connection::FRESH : Proto::Connection::RESUME);
+	m_tcp_proto_conn.Send(cn);
+	m_tcp_proto_conn.Recv(cn);
+	return cn == Proto::Connection::FRESH;
+}
+
+void Client::init_post_connection()
+{
+	std::cout << "Initializing connection" << std::endl;
 	auto bp = m_bypass_udp ? Proto::UDPBypass::BYPASS : Proto::UDPBypass::NO_BYPASS;
 	CHECK_RET(m_tcp_proto_conn.Send(bp));
 
 	if(!m_bypass_udp)
 	{
-		std::cout << "Creating UDP Socket ..." << std::endl;
-		
-		CHECK_RET(m_udp_proto_conn.create(AF_INET, SOCK_DGRAM))
-		CHECK_RET(m_udp_proto_conn.bind(Address(AF_INET, SOCK_DGRAM, "0.0.0.0", 0)))
-
-		auto [res, udp_plug_adr] = m_udp_proto_conn.getsockname();
-		CHECK_RET(res);
-
-		m_udp_port = udp_plug_adr.port();
-
-		std::cout << "UDP Socket created at port " << m_udp_port << ". Initializing connection..." << std::endl;
 
 		std::array<unsigned char, 2> port;
 
@@ -60,9 +87,6 @@ void Client::initiate()
 		std::cout << "UDP bypass enabled." << std::endl;
 		m_udp_ka_time = std::numeric_limits<time_t>::max();
 	}
-	
-	m_pfds = {{m_tcp_proto_conn.socket(), POLLIN, 0}, {m_udp_proto_conn.socket(), POLLIN, 0}};
-	m_last_tcp_packet = m_cur_time = time(nullptr);
 }
 
 void Client::proc_loop()
@@ -82,13 +106,15 @@ void Client::proc_loop()
 		
 		while(m_pfds.front().revents & pollmask)
 		{
-			if(m_pfds.front().revents & (POLLERR | POLLHUP))
+			if(m_pfds.front().revents & (POLLIN | POLLRDNORM))
+			{
+				process_tcp_message();
+			}
+			else if(m_pfds.front().revents & (POLLERR | POLLHUP))
 			{
 				std::cout << "Server disconnected. Quitting." << std::endl;
 				return;
 			}
-
-			process_tcp_message();
 
 			if(!m_tcp_proto_conn.valid())
 			{
@@ -292,7 +318,7 @@ void Client::process_tcp_message()
 		}
 		return;
 	case Proto::OpCode::TCP_TIMEOUT:
-		connect_proto_tcp();
+		on_timeout();
 		return;
 	case Proto::OpCode::CONNECT:
 	case Proto::OpCode::UDP_CONNECTED:
@@ -374,20 +400,6 @@ void Client::load_config()
 	std::cout << "Configuration loaded successfully." << std::endl;
 }
 
-void Client::connect_proto_tcp()
-{
-	Address tcp_srv(AF_INET, SOCK_STREAM, m_hostname, m_tcp_port);
-	m_proto_udp_address = tcp_srv;
-
-	CHECK_RET(m_tcp_proto_conn.create(AF_INET, SOCK_STREAM))
-
-	std::cout << "Connecting to server at " << m_hostname << ':'
-		<< m_tcp_port << " ..." << std::endl;
-
-	CHECK_RET(m_tcp_proto_conn.connect(tcp_srv))
-
-	std::cout << "Connected to server." << std::endl;
-}
 
 void Client::on_timeout()
 {
@@ -397,6 +409,21 @@ void Client::on_timeout()
 	m_pfds.resize(2 + m_udp_sockets.size() + m_tcp_listener_sockets.size());
 
 	m_tcp_proto_conn.destroy();
-	connect_proto_tcp();
+
+	if(connect_proto_tcp(false))
+	{
+		m_udp_sockets.clear();
+
+		m_tcp_listener_sockets.clear();
+		m_connections.clear();
+
+		m_pfds.resize(2);
+
+		init_post_connection();
+
+		load_config();
+	}
+
+	m_pfds.front().fd = m_tcp_proto_conn.socket();
 	m_last_tcp_packet = m_cur_time = time(nullptr);
 }
