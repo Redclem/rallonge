@@ -263,9 +263,21 @@ protected:
 		return rpoll;
 	}
 	
+	// Check if the tcp connection timed out and send the network message if it has
 	bool check_tcp_timeout()
 	{
-		return m_cur_time >= m_last_tcp_packet + tcp_timeout;
+		if(m_cur_time >= m_last_tcp_packet + tcp_timeout)
+		{
+			send_timeout_message();
+			return true;
+		}
+		return false;
+	}
+
+	void send_timeout_message()
+	{
+		Proto::OpCode op(Proto::OpCode::TCP_TIMEOUT);
+		m_tcp_proto_conn.Send(op);
 	}
 };
 
