@@ -20,7 +20,7 @@
 #define ENCODE_KEY(key, loc) *reinterpret_cast<key_sock_uni_t*>(loc) = key_sock_uni_t(key);
 #define DECODE_KEY(loc) *reinterpret_cast<key_sock_uni_t*>(loc)
 
-
+#undef min
 
 class AppBase : public NoCopy
 {
