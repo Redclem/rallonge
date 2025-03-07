@@ -2,16 +2,6 @@
 Except written otherwise, numbers (including ports) are encoded in little endian
 Except written otherwise, messages are valid client to server and server to client and on both protocols
 
-When connecting : send byte to determine if the connection is fresh or if it is a resume after timeout
-Connection indicator (TCP, client -> server and server -> client)
-- 1b : connection indicator
-
-Config transmission (TCP, client -> server)
-- 1b : UDP bypass information (ubi = BYPASS or NO_BYPASS)
-- 2b (if ubi == NO_BYPASS) : UDP port
-
-Second transmission (TCP, server -> client) (if no bypass)
-- 2b : UDP port
 
 After first transmission, if no bypass, UDP messages are exchanged to pierce hole through eventual NAT
 
@@ -65,6 +55,16 @@ Message codes (excluding initial port transmission over TCP):
 	* 8b : skey
 
 - 7 : Timeout (TCP Only) : indicate that the TCP stream between client and server timed out and will be reestablished.
+
+- 8 : Establish rallonge TCP connection : First message and after timeout
+	When connecting : send byte to determine if the connection is fresh or if it is a resume after timeout
+	Connection indicator (TCP, client -> server and server -> client)
+	* 1b : connection indicator
+
+	Config transmission (TCP, client -> server), if connection fresh (for client or server)
+	* 1b : UDP bypass information (ubi = BYPASS or NO_BYPASS) (client -> server)
+	* 2b (if ubi == NO_BYPASS) : UDP port
+
 
 ==============================================
 

@@ -43,6 +43,13 @@ bool Client::connect_proto_tcp(bool fresh)
 
 	CHECK_RET(m_tcp_proto_conn.connect(tcp_srv))
 
+	Proto::OpCode opcode = Proto::OpCode::ESTABLISH;
+	m_tcp_proto_conn.Send(opcode);
+	do
+	{
+		m_tcp_proto_conn.Recv(opcode);
+	} while (opcode != Proto::OpCode::ESTABLISH);
+
 	std::cout << "Connected to server." << std::endl;
 
 	m_pfds.front().fd = m_tcp_proto_conn.socket();
@@ -92,8 +99,11 @@ void Client::proc_loop()
 {
 	while(m_run)
 	{
-		if(check_tcp_timeout())
+		if (check_tcp_timeout())
+		{
+			std::cout << "Timeout!" << std::endl;
 			on_timeout();
+		}
 
 		auto rpoll = poll_pfds();
 		
@@ -111,14 +121,16 @@ void Client::proc_loop()
 			}
 			else if(m_pfds.front().revents & (POLLERR | POLLHUP))
 			{
-				std::cout << "Server disconnected. Quitting." << std::endl;
-				return;
+				std::cout << "Lost connection. Reconnecting." << std::endl;
+				send_timeout_message();
+				on_timeout();
 			}
 
 			if(!m_tcp_proto_conn.valid())
 			{
-				std::cout << "Server disconnected. Quitting." << std::endl;
-				return;
+				std::cout << "Lost connection. Reconnecting." << std::endl;
+				send_timeout_message();
+				on_timeout();
 			}
 
 			// /!\ with TCP message, the pfd vector might have been reallocated
@@ -317,6 +329,7 @@ void Client::process_tcp_message()
 		}
 		return;
 	case Proto::OpCode::TCP_TIMEOUT:
+		std::cout << "Timeout on other side!" << std::endl;
 		on_timeout();
 		return;
 	case Proto::OpCode::CONNECT:
@@ -402,7 +415,7 @@ void Client::load_config()
 
 void Client::on_timeout()
 {
-	std::cout << "Timeout!" << std::endl;
+	std::cout << "Reestablishing connection..." << std::endl;
 
 	m_connections.clear();
 	m_pfds.resize(2 + m_udp_sockets.size() + m_tcp_listener_sockets.size());

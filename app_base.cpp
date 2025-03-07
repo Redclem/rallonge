@@ -117,6 +117,9 @@ void AppBase::process_bypassed_message()
 	uint32_t len = DECODE_UINT32(buf.data() + 2);
 
 	m_message_buffer.resize(len);
+
+	LOG("Processing bypassed udp with size " << len << std::endl)
+
 	m_tcp_proto_conn.Recv(m_message_buffer, MSG_WAITALL);
 
 	m_udp_sockets[bridge].sck.Sendto(m_message_buffer, m_udp_sockets[bridge].addr);

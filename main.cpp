@@ -63,11 +63,9 @@ int main(int argc, char * argv[])
 					std::cout << usage;
 					return 0;
 				}
-				while (true)
-				{
-					Server srv(port_t(atoi(argv[2])));
-					srv.run();
-				}
+
+				Server srv(port_t(atoi(argv[2])));
+				srv.run();
 		}
 		else
 		{

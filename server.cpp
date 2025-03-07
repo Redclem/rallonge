@@ -51,6 +51,13 @@ bool Server::connect_proto_tcp(bool fresh)
 	std::tie(m_tcp_proto_conn, m_proto_udp_address) = tcp_plug.accept_addr();
 	CHECK_RET(m_tcp_proto_conn.valid())
 
+	Proto::OpCode opcode = Proto::OpCode::ESTABLISH;
+	m_tcp_proto_conn.Send(opcode);
+	do
+	{
+		m_tcp_proto_conn.Recv(opcode);
+	} while (opcode != Proto::OpCode::ESTABLISH);
+
 	std::cout << "Client connected : " << m_proto_udp_address.str() << std::endl;
 
 	m_pfds.front().fd = m_tcp_proto_conn.socket();
@@ -142,15 +149,17 @@ void Server::proc_loop()
 			}
 			else if(m_pfds.front().revents & (POLLERR | POLLHUP))
 			{
-				std::cout << "Client disconnected. Quitting." << std::endl;
-				return;
+				std::cout << "Lost connection. Reconnecting." << std::endl;
+				send_timeout_message();
+				on_timeout();
 			}
 
 
 			if(!m_tcp_proto_conn.valid())
 			{
-				std::cout << "Client disconnected. Quitting." << std::endl;
-				return;
+				std::cout << "Lost connection. Reconnecting." << std::endl;
+				send_timeout_message();
+				on_timeout();
 			}
 
 			// /!\ with TCP message, the pfd vector might have been reallocated
