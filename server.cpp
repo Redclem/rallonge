@@ -8,6 +8,7 @@
 #include <iostream>
 #include <iterator>
 #include <stdexcept>
+#include <sys/socket.h>
 #include <tuple>
 #include <array>
 
@@ -81,7 +82,7 @@ void Server::init_post_connection()
 		port[1] = m_udp_port >> 8;
 
 		CHECK_RET(m_tcp_proto_conn.Send(port))
-		CHECK_RET(m_tcp_proto_conn.Recv(port))
+		CHECK_RET(m_tcp_proto_conn.Recv(port, MSG_WAITALL))
 		CHECK_RET(!port.empty());
 
 		port_t client_udp_port = port[0] | port[1] << 8;
@@ -249,12 +250,12 @@ void Server::process_tcp_message()
 	case Proto::OpCode::CONFIG:
 		{
 			std::array<unsigned char, 2> size_dat;
-			CHECK_RET(m_tcp_proto_conn.Recv(size_dat))
+			CHECK_RET(m_tcp_proto_conn.Recv(size_dat, MSG_WAITALL))
 
 			uint16_t size = DECODE_UINT16(size_dat.data());
 			
 			m_message_buffer.resize(size);
-			CHECK_RET(m_tcp_proto_conn.Recv(m_message_buffer))
+			CHECK_RET(m_tcp_proto_conn.Recv(m_message_buffer, MSG_WAITALL))
 
 			add_endpoint(Proto::Protocol(m_message_buffer[0]), DECODE_UINT16(m_message_buffer.data() + 1), reinterpret_cast<char*>(m_message_buffer.data() + 3));
 		}
@@ -275,7 +276,7 @@ void Server::process_tcp_message()
 			}
 
 			std::array<unsigned char, 20> hdr;
-			CHECK_RET(m_tcp_proto_conn.Recv(hdr))
+			CHECK_RET(m_tcp_proto_conn.Recv(hdr, MSG_WAITALL))
 
 			ComKey comkey{DECODE_KEY(&hdr[0]), DECODE_KEY(&hdr[8])};
 
@@ -298,7 +299,7 @@ void Server::process_tcp_message()
 	case Proto::OpCode::CONNECT:
 		{
 			std::array<unsigned char, 18> bridge_dat;
-			CHECK_RET(m_tcp_proto_conn.Recv(bridge_dat))
+			CHECK_RET(m_tcp_proto_conn.Recv(bridge_dat, MSG_WAITALL))
 			
 			uint16_t bridge = DECODE_UINT16(bridge_dat);
 			key_sock_uni_t key = DECODE_KEY(&bridge_dat[2]);
@@ -351,7 +352,7 @@ void Server::process_tcp_message()
 	case Proto::OpCode::TCP_DISCONNECTED:
 		{
 			std::array<unsigned char, 16> bridge_dat;
-			CHECK_RET(m_tcp_proto_conn.Recv(bridge_dat))
+			CHECK_RET(m_tcp_proto_conn.Recv(bridge_dat, MSG_WAITALL))
 
 			disconnect_tcp<false>(ComKey{DECODE_KEY(&bridge_dat[0]), DECODE_KEY(&bridge_dat[8])});
 

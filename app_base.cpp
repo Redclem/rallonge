@@ -3,6 +3,7 @@
 #include "socket.hpp"
 #include <array>
 #include <iostream>
+#include <sys/socket.h>
 
 void AppBase::discard_udp_message()
 {
@@ -16,10 +17,10 @@ void AppBase::discard_udp_message()
 	case Proto::OpCode::MESSAGE:
 		{
 			std::array<unsigned char, 6> head;
-			CHECK_RET(m_udp_proto_conn.Recv(head))
+			CHECK_RET(m_udp_proto_conn.Recv(head, MSG_WAITALL))
 			uint32_t len = DECODE_UINT32(head.data() + 2);
-			std::vector<unsigned char> vdat(len);
-			CHECK_RET(m_udp_proto_conn.Recv(vdat));
+			m_message_buffer.resize(len);
+			CHECK_RET(m_udp_proto_conn.Recv(m_message_buffer, MSG_WAITALL));
 			return;
 		}
 	case Proto::OpCode::UDP_CONNECTED:
@@ -79,7 +80,7 @@ void AppBase::establish_udp_connection()
 void AppBase::process_udp_message()
 {
 	m_message_buffer.resize(m_message_buffer.capacity());
-	CHECK_RET(m_udp_proto_conn.Recv(m_message_buffer))
+	CHECK_RET(m_udp_proto_conn.Recv(m_message_buffer, MSG_WAITALL))
 
 	switch(Proto::OpCode(m_message_buffer[0]))
 	{
@@ -111,7 +112,7 @@ void AppBase::process_udp_message()
 void AppBase::process_bypassed_message()
 {
 	std::array<unsigned char, 6> buf;
-	m_tcp_proto_conn.Recv(buf);
+	CHECK_RET(m_tcp_proto_conn.Recv(buf, MSG_WAITALL))
 
 	uint16_t bridge = DECODE_UINT16(buf.data());
 	uint32_t len = DECODE_UINT32(buf.data() + 2);

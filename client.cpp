@@ -7,6 +7,7 @@
 #include <array>
 #include <limits>
 #include <stdexcept>
+#include <sys/socket.h>
 
 void Client::run()
 {
@@ -47,7 +48,7 @@ bool Client::connect_proto_tcp(bool fresh)
 	m_tcp_proto_conn.Send(opcode);
 	do
 	{
-		m_tcp_proto_conn.Recv(opcode);
+		CHECK_RET(m_tcp_proto_conn.Recv(opcode))
 	} while (opcode != Proto::OpCode::ESTABLISH);
 
 	std::cout << "Connected to server." << std::endl;
@@ -55,8 +56,8 @@ bool Client::connect_proto_tcp(bool fresh)
 	m_pfds.front().fd = m_tcp_proto_conn.socket();
 
 	Proto::Connection cn(fresh ? Proto::Connection::FRESH : Proto::Connection::RESUME);
-	m_tcp_proto_conn.Send(cn);
-	m_tcp_proto_conn.Recv(cn);
+	CHECK_RET(m_tcp_proto_conn.Send(cn))
+	CHECK_RET(m_tcp_proto_conn.Recv(cn))
 	return cn == Proto::Connection::FRESH;
 }
 
@@ -74,7 +75,7 @@ void Client::init_post_connection()
 		ENCODE_UINT16(m_udp_port, port)
 
 		CHECK_RET(m_tcp_proto_conn.Send(port))
-		CHECK_RET(m_tcp_proto_conn.Recv(port))
+		CHECK_RET(m_tcp_proto_conn.Recv(port, MSG_WAITALL))
 
 		port_t client_udp_port = DECODE_UINT16(port);
 		m_proto_udp_address.set_port(client_udp_port);
@@ -278,7 +279,7 @@ void Client::process_tcp_message()
 			}
 
 			std::array<unsigned char, 20> hdr;
-			CHECK_RET(m_tcp_proto_conn.Recv(hdr))
+			CHECK_RET(m_tcp_proto_conn.Recv(hdr, MSG_WAITALL))
 
 			ComKey ck{DECODE_KEY(&hdr[0]), DECODE_KEY(&hdr[8])};
 
@@ -301,7 +302,7 @@ void Client::process_tcp_message()
 	case Proto::OpCode::TCP_DISCONNECTED:
 		{
 			std::array<unsigned char, 16> bridge_dat;
-			CHECK_RET(m_tcp_proto_conn.Recv(bridge_dat))
+			CHECK_RET(m_tcp_proto_conn.Recv(bridge_dat, MSG_WAITALL))
 
 			disconnect_tcp<false>({DECODE_KEY(&bridge_dat[0]), DECODE_KEY(&bridge_dat[8])});
 
@@ -311,7 +312,7 @@ void Client::process_tcp_message()
 		{
 			std::array<unsigned char, 24> keys;
 
-			CHECK_RET(m_tcp_proto_conn.Recv(keys))
+			CHECK_RET(m_tcp_proto_conn.Recv(keys, MSG_WAITALL))
 
 			auto iter_co = m_connections.find(ComKey{DECODE_KEY(&keys[0]), DECODE_KEY(&keys[8])});
 
