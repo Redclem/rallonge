@@ -7,7 +7,6 @@
 #include <array>
 #include <limits>
 #include <stdexcept>
-#include <sys/socket.h>
 
 void Client::run()
 {

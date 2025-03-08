@@ -3,7 +3,6 @@
 #include "socket.hpp"
 #include <array>
 #include <iostream>
-#include <sys/socket.h>
 
 void AppBase::discard_udp_message()
 {

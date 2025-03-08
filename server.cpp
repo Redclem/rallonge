@@ -8,7 +8,6 @@
 #include <iostream>
 #include <iterator>
 #include <stdexcept>
-#include <sys/socket.h>
 #include <tuple>
 #include <array>
 
